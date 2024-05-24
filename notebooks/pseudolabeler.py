@@ -6,6 +6,7 @@ from video2dataset.dataloader import get_video_dataset
 
 # WebVid validation split
 # SHARDS = "/cluster/work/cotterell/mm_swissai/datasets/howto100m/0000000000.tar"
+# SHARDS = "/cluster/work/cotterell/mm_swissai/datasets/hdvila/1000_hd_vila_shuffled/0000000000.tar"
 SHARDS = "/cluster/work/cotterell/mm_swissai/datasets/hdvila/1000_hd_vila_shuffled/00000{00000..00032}.tar"
 
 if __name__ == "__main__":
