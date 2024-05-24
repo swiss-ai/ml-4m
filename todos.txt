@@ -1,0 +1,12 @@
+4M:
+raw data --> webd --> pseudolabeled webd
+
+v2d:
+raw data --> v2d --> pseudolabeled v2d
+
+1. Run pseudolabel_vitdet.py on rgb/shard-00000.tar to confirm we can generate bb/shard-00000.tar
+2. Run YOLO on video2dataset format
+    save v2d into format of modalityA/shard-xxxxx.tar
+    load v2d into tensors
+    run YOLO on tensors
+    save results to modalityB/shard-xxxxx.tar
