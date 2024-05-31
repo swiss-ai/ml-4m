@@ -4,6 +4,8 @@ import torch
 from webdataset import WebLoader
 from video2dataset.dataloader import get_video_dataset
 
+# https://stackoverflow.com/questions/78537817/importerror-cannot-import-name-dill-available if running with pytorch 2.3.0 need to use the fix here
+# might also get `undefined symbol when importing torchaudio with pytorch` when running with torch 2.3.0
 # WebVid validation split
 # SHARDS = "/cluster/work/cotterell/mm_swissai/datasets/howto100m/0000000000.tar"
 # SHARDS = "/cluster/work/cotterell/mm_swissai/datasets/hdvila/1000_hd_vila_shuffled/0000000000.tar"
@@ -16,7 +18,7 @@ if __name__ == "__main__":
         "num_threads": 12,  # use 12 threads to decode the video
     }
     resize_size = crop_size = 256
-    batch_size = 2
+    batch_size = 10
 
     dset = get_video_dataset(
         urls=SHARDS,
