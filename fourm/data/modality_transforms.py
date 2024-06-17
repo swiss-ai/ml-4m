@@ -40,6 +40,7 @@ from fourm.utils.data_constants import (
     PAD_MASK_VALUE,
 )
 
+# start with data, then models
 
 # The @-symbol is used to specify the resolution of a modality. Syntax: modality@resolution
 def get_transform_key(mod_name):
@@ -216,7 +217,7 @@ class ImageTransform(AbstractTransform):
         return img
 
 
-class RGBTransform(ImageTransform):
+class RGBTransform(ImageTransform): # For RGB in raw format for 4M because it's passed in directly (and also training tokenizer)
 
     def __init__(self, imagenet_default_mean_and_std=True, color_jitter=False, color_jitter_strength=0.5):
         self.rgb_mean = IMAGENET_INCEPTION_MEAN if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_MEAN
@@ -382,6 +383,7 @@ class NormalTransform(ImageTransform):
 
 
 class SemsegTransform(ImageTransform):
+    # apply for learning the tokens?
 
     def __init__(
         self, scale_factor=1.0, shift_idx_by_one=False, id_mapping: Optional[Dict] = None, select_channel=None
@@ -677,6 +679,7 @@ class MaskTransform(ImageTransform):
 
 
 class TokTransform(AbstractTransform):
+    # Transformation on the tokens
 
     def __init__(self):
         pass
@@ -703,13 +706,13 @@ class TokTransform(AbstractTransform):
                 "Crop settings / augmentation index are missing but a pre-tokenized modality is being used"
             )
         v = torch.tensor(v[rand_aug_idx])
-        return v
+        return v # Since we augment before saving (create 5 augmented versions of the same image), in this transform you randomly sample one of the augmentations to work with. 
 
     def postprocess(self, sample):
         return sample
 
 
-class DetectionTransform(AbstractTransform):
+class DetectionTransform(AbstractTransform): # bounding boxes
 
     def __init__(
         self,
@@ -1609,3 +1612,9 @@ class JSONTransform(AbstractTransform):
 
     def postprocess(self, sample):
         return sample
+<<<<<<< HEAD
+=======
+    
+
+# CaptionEmbTransform for the caption embeddings
+>>>>>>> 9da9835 (Add notes from Ali)

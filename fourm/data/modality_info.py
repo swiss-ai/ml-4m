@@ -39,6 +39,7 @@ from fourm.models.encoder_embeddings import (
 )
 from fourm.utils import generate_uint15_hash
 
+# Specifications about different modalities
 MODALITY_INFO = {
     # 4M-7 modalities
     "rgb@224": {
@@ -409,16 +410,14 @@ MODALITY_INFO = {
 # Note: @res suffix is ignored for modality transforms
 MODALITY_TRANSFORMS = {
     # 4M-7 modalities
-    "rgb": RGBTransform(imagenet_default_mean_and_std=True),
-    "caption": CaptionTransform(aligned_captions=True),
-    "det": DetectionTransform(
-        det_threshold=0.6, det_max_instances=None, bbox_order="dist_to_orig", coord_bins=1000, min_visibility=0.0
-    ),
-    "tok_rgb": TokTransform(),
-    "tok_depth": TokTransform(),
-    "tok_normal": TokTransform(),
-    "tok_semseg": TokTransform(),
-    "tok_clip": TokTransform(),
+    'rgb': RGBTransform(imagenet_default_mean_and_std=True),
+    'caption': CaptionTransform(aligned_captions=True),
+    'det': DetectionTransform(det_threshold=0.6, det_max_instances=None, bbox_order='dist_to_orig', coord_bins=1000, min_visibility=0.0),
+    'tok_rgb': TokTransform(), # tok_ indicates its a token representation
+    'tok_depth': TokTransform(),
+    'tok_normal': TokTransform(),
+    'tok_semseg': TokTransform(),
+    'tok_clip': TokTransform(),
     # 4M-21 modalities
     "t5_caption": CaptionEmbTransform(),
     "metadata": MetadataTransform(

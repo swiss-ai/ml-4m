@@ -128,7 +128,7 @@ def chunk_span_masking(sequence_chunks: List[List[int]], sentinel_to_id: Dict[in
 
 
 
-class UnifiedMasking(object):
+class UnifiedMasking(object): # this defines the masking logic
     def __init__(self,
                  modality_info: Dict,
                  text_tokenizer: Optional[Tokenizer],
