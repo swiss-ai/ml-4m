@@ -459,7 +459,7 @@ def build_huggingface_pretraining_dataloader(
         UnifiedDataTransform(transforms_dict=modality_transforms, image_augmenter=image_augmenter),
         UnifiedMasking(modality_info=modality_info, text_tokenizer=text_tokenizer,
                        input_tokens_range=input_tokens_range, target_tokens_range=target_tokens_range)
-    ])
+    ]) # This executes the masking
     
     datapipe = wds.DataPipeline(
         dataset,
