@@ -29,6 +29,11 @@ from fourm.data.modality_transforms import (
     ColorPaletteTransform,
     SAMInstanceTokTransform,
     SAMInstanceTransform,
+    VideoDescriptionTransform,
+    VideoDetectionTransform,
+    VideoRGBTransform,
+    VideoTokTransform,
+    VideoTranscriptTransform,
 )
 from fourm.models.decoder_embeddings import ImageTokenDecoderEmbedding, SequenceDecoderEmbedding
 from fourm.models.encoder_embeddings import (
@@ -468,6 +473,15 @@ MODALITY_TRANSFORMS = {
     "tok_imagebind_global": TokTransform(),
     # Other
     "mask_valid": MaskTransform(mask_pool_size=1),
+    # Video
+    "video_rgb": VideoRGBTransform(imagenet_default_mean_and_std=True),  # TODO: check parameters
+    "video_tok_rgb": VideoTokTransform(),  # tok_ indicates its a token representation
+    "video_tok_clip": VideoTokTransform(),  # TODO: check parameters
+    "video_description": VideoDescriptionTransform(aligned_captions=True),  # TODO: check parameters
+    "video_transcript": VideoTranscriptTransform(aligned_captions=True),  # TODO: check parameters
+    "video_det": VideoDetectionTransform(
+        det_threshold=0.6, det_max_instances=None, bbox_order="dist_to_orig", coord_bins=1000, min_visibility=0.0
+    ),  # TODO: check parameters
 }
 
 MODALITY_TRANSFORMS_DIVAE = {
