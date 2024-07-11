@@ -108,15 +108,15 @@ class SaveVQDataset(Dataset):
         )
 
     def loader(self, path, extensions):
-        video_files = []
         with tarfile.open(path, "r") as tar:
             for member in tar.getmembers():
-                if member.isfile() and member.name.endswith(extensions):
+                if member.isfile() and any(
+                    member.name.endswith(ext) for ext in extensions
+                ):
                     file_obj = tar.extractfile(member)
-                    video_files.append(BytesIO(file_obj.read()))
-        return video_files
+                    yield BytesIO(file_obj.read())
 
-    def _extract_frames(self, video_bytes) -> list:
+    def _extract_frames(self, video_bytes):
         video_bytes.seek(0)
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         temp_file.write(video_bytes.read())
@@ -126,21 +126,18 @@ class SaveVQDataset(Dataset):
         if not cap.isOpened():
             raise ValueError("Failed to open video stream from bytes")
 
-        frames = []
         frame_count = 0
 
         while True:
-            # FIXME: used to artificially downsample when processing non-final shards
+            # FIXME: artificial downsampling for now, remove when having actual shards!
             if frame_count % 10 == 0:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                # cv2 uses BGR, PIL uses RGB --> convert
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frame = Image.fromarray(frame)
-                frames.append(frame)
+                yield frame  # Yield each frame one by one
             else:
-                # skip frames we are not interested in
                 ret = cap.grab()
                 if not ret:
                     break
@@ -148,8 +145,6 @@ class SaveVQDataset(Dataset):
 
         cap.release()
         os.remove(temp_file.name)
-
-        return frames
 
     def __len__(self):
         return len(self.samples)
@@ -190,10 +185,18 @@ class SaveVQDataset(Dataset):
         )
 
         all_video_frames = []
-        videos = videos[:20]
         # Perform augmentations and optionally mask images
-        for video in tqdm(videos):
+        v_idx = 0
+        for video in videos:
+            # FIXME: remove break at 20 + printing
+            if v_idx > 30:
+                break
+            if index == 0:
+                print("in loop", v_idx)
             video_frames = self._extract_frames(video)
+
+            if index == 0:
+                print("got frames", v_idx)
             # Create or load crop settings
             if os.path.exists(crop_settings_path) and not self.force_new_crop:
                 try:
@@ -206,14 +209,14 @@ class SaveVQDataset(Dataset):
 
                 # First crop is always non-flipped center crop
                 crop_coords, _, _, _, _ = self.center_crop_augmenter(
-                    {self.task: video_frames[0]}, None
+                    {self.task: next(video_frames)}, None
                 )
                 settings.append((*crop_coords, 0))
 
                 # Subsequent crops are random
                 for _ in range(1, self.n_crops):
                     crop_coords, h_flip, _, _, _ = self.random_crop_augmenter(
-                        {self.task: video_frames[0]}, None
+                        {self.task: next(video_frames)}, None
                     )
                     settings.append((*crop_coords, 1 if h_flip else 0))
 
@@ -222,6 +225,8 @@ class SaveVQDataset(Dataset):
                     os.makedirs(os.path.dirname(crop_settings_path), exist_ok=True)
                     np.save(crop_settings_path, settings)
             current_video = []
+            if index == 0:
+                print("looping over frames", v_idx)
             for frame in video_frames:
                 current_frame = []
                 for i, j, h, w, h_flip in settings:
@@ -242,8 +247,10 @@ class SaveVQDataset(Dataset):
                         raise NotImplementedError
 
                 current_video.append(torch.stack(current_frame))
-
+            if index == 0:
+                print("done video: ", v_idx)
             all_video_frames.append(torch.stack(current_video))
+            v_idx += 1
 
         end = time.time()
         print(f"IDX {index}: Extracting/Augmenting took {end - start} seconds.")
@@ -253,9 +260,6 @@ class SaveVQDataset(Dataset):
 def get_feature_extractor(args):
     if args.task == "CLIP-B16":
         raise NotImplementedError
-        teacher_model, _ = clip.load("ViT-B/16", device="cpu", jit=False)
-        teacher_model = teacher_model.visual
-        return teacher_model.eval()
     else:
         return None
 
@@ -321,8 +325,8 @@ def main(args):
     if global_rank == 0 and args.verbose:
         pbar = tqdm(total=len(data_loader))
     else:
-        pbar = None       
-        
+        pbar = None
+
     # XXX: why is loading (__getitem__) so slow?
     for videos_batch, tokens_paths in data_loader:
         # NOTE: videos_batch is a batch of video shards (tar files), each containing a list of videos (of multiple/variable-length frames)
@@ -374,15 +378,6 @@ def main(args):
             with torch.no_grad():
                 if "CLIP" in args.task:
                     raise NotImplementedError
-                    B, C, H, W = sub_batch.shape
-                    P_H, P_W = feature_extractor.conv1.kernel_size
-                    N_H, N_W = H // P_H, W // P_W
-                    sub_batch = feature_extractor(
-                        sub_batch, return_final_tokens_no_cls=True
-                    )
-                    sub_batch = rearrange(
-                        sub_batch, "b (nh nw) d -> b d nh nw", nh=N_H, nw=N_W
-                    )
 
                 tokens = model.tokenize(sub_batch)
                 tokens = rearrange(tokens, "b h w -> b (h w)")
