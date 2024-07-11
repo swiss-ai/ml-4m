@@ -63,7 +63,7 @@ class SaveVQDataset(Dataset):
         resample_mode: str = "bilinear",
         corrupt_samples_log: Optional[str] = None,
         dryrun: bool = False,
-        force_load_crop: bool = False,
+        force_new_crop: bool = False,
     ):
         super().__init__()
 
@@ -74,6 +74,7 @@ class SaveVQDataset(Dataset):
         self.crop_settings_root = os.path.join(
             os.path.abspath(__file__ + "/../"), crop_settings_dir
         )
+        print(f"Using:\nData: {self.data_root}\nTokens: {self.tokens_root}")
         self.n_crops = n_crops
         self.input_size = input_size
         self.task = task
@@ -81,10 +82,9 @@ class SaveVQDataset(Dataset):
         self.task_transforms = task_transforms
         self.resample_mode = resample_mode
 
-        self.force_load_crop = force_load_crop
+        self.force_new_crop = force_new_crop
 
         self.dryrun = dryrun
-        self.force_load_crop = force_load_crop
 
         # XXX: not sure how 4m originally did this; may be unnecessary
         self.classes, self.class_to_idx = find_classes(root)
@@ -93,7 +93,9 @@ class SaveVQDataset(Dataset):
             root, self.class_to_idx, ("tar",), None, allow_empty=True
         )
 
-        # TODO: check augmentations (implemented but unchecked)
+        # TODO: think about good augs for videos.
+        # if videos are already cropped at this point, less sensible here
+        # there are more augs in image_augmenter.py
         self.center_crop_augmenter = CenterCropImageAugmenter(
             target_size=self.input_size, hflip=0.0, main_domain=task
         )
@@ -125,15 +127,26 @@ class SaveVQDataset(Dataset):
             raise ValueError("Failed to open video stream from bytes")
 
         frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            # FIXME: do we need to convert to RGB here?
-            frame = Image.fromarray(frame)
-            frames.append(frame)
-        cap.release()
+        frame_count = 0
 
+        while True:
+            # FIXME: used to artificially downsample when processing non-final shards
+            if frame_count % 10 == 0:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                # cv2 uses BGR, PIL uses RGB --> convert
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame = Image.fromarray(frame)
+                frames.append(frame)
+            else:
+                # skip frames we are not interested in
+                ret = cap.grab()
+                if not ret:
+                    break
+            frame_count += 1
+
+        cap.release()
         os.remove(temp_file.name)
 
         return frames
@@ -141,22 +154,32 @@ class SaveVQDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int):
+        """Gets a single *shard* of videos and the corresponding shard path.
+
+        Args:
+            index (int): Index of the shard from the dataset to get.
+
+        Raises:
+            NotImplementedError: If a config value used previously for images is set.
+            FileNotFoundError: If the crop settings file does not exist.
+
+        Returns:
+            list: List of videos with len(videos) == len(shard), each of shape:
+                (n_frames, n_crops, c, h, w), where c=3, h=w=224 (=input_size; due to tokenizer)
+            str: Path to the current shard of videos (tokenized/output).
+        """
+
         path, _ = self.samples[index]
         videos = self.loader(path, VIDEO_EXTENSIONS)
 
-        video_frames = [self._extract_frames(video) for video in videos]
+        start = time.time()
 
         class_id, file_id = path.split("/")[-2:]
         file_id = file_id.split(".")[0]
 
         if self.mask_value is not None:
             raise NotImplementedError
-            # FIXME: what to do with the masking stuff?
-            mask_path = os.path.join(
-                self.data_root, "mask_valid", class_id, f"{file_id}.png"
-            )
-            mask = Image.open(mask_path)
 
         tokens_path = os.path.join(self.tokens_root, f"{file_id}.tar")
         if not self.dryrun:
@@ -166,11 +189,13 @@ class SaveVQDataset(Dataset):
             self.crop_settings_root, class_id, f"{file_id}.npy"
         )
 
+        all_video_frames = []
+        videos = videos[:20]
         # Perform augmentations and optionally mask images
-        videos = []
-        for video in video_frames:
+        for video in tqdm(videos):
+            video_frames = self._extract_frames(video)
             # Create or load crop settings
-            if os.path.exists(crop_settings_path) or self.force_load_crop:
+            if os.path.exists(crop_settings_path) and not self.force_new_crop:
                 try:
                     settings = np.load(crop_settings_path)
                 except:
@@ -181,14 +206,14 @@ class SaveVQDataset(Dataset):
 
                 # First crop is always non-flipped center crop
                 crop_coords, _, _, _, _ = self.center_crop_augmenter(
-                    {self.task: video[0]}, None
+                    {self.task: video_frames[0]}, None
                 )
                 settings.append((*crop_coords, 0))
 
                 # Subsequent crops are random
                 for _ in range(1, self.n_crops):
                     crop_coords, h_flip, _, _, _ = self.random_crop_augmenter(
-                        {self.task: video[0]}, None
+                        {self.task: video_frames[0]}, None
                     )
                     settings.append((*crop_coords, 1 if h_flip else 0))
 
@@ -197,7 +222,7 @@ class SaveVQDataset(Dataset):
                     os.makedirs(os.path.dirname(crop_settings_path), exist_ok=True)
                     np.save(crop_settings_path, settings)
             current_video = []
-            for frame in video:
+            for frame in video_frames:
                 current_frame = []
                 for i, j, h, w, h_flip in settings:
                     img_mod = self.task_transforms[self.task].preprocess(frame.copy())
@@ -215,31 +240,14 @@ class SaveVQDataset(Dataset):
 
                     if self.mask_value is not None:
                         raise NotImplementedError
-                    #     mask_valid = self.task_transforms["mask_valid"].preprocess(mask.copy())
-                    #     mask_valid = self.task_transforms["mask_valid"].image_augment(
-                    #         mask_valid,
-                    #         (i, j, h, w),
-                    #         h_flip,
-                    #         None,
-                    #         (self.input_size, self.input_size),
-                    #         None,
-                    #         None,
-                    #     )
-                    #     mask_valid = self.task_transforms["mask_valid"].postprocess(mask_valid)
-                    #     img_mod[~repeat(mask_valid, "1 h w -> c h w", c=img_mod.shape[0])] = (
-                    #         self.mask_value
-                    #     )
-                    #     mask_valid = (
-                    #         mask_valid.float() * 2 - 1
-                    #     )  # Valid regions -> 1, Masked-out regions -> -1
-                    #     img_mod = torch.cat(
-                    #         [img_mod, mask_valid], dim=0
-                    #     )  # Concat image with mask
 
                 current_video.append(torch.stack(current_frame))
-            videos.append(torch.stack(current_video))
 
-        return videos, tokens_path
+            all_video_frames.append(torch.stack(current_video))
+
+        end = time.time()
+        print(f"IDX {index}: Extracting/Augmenting took {end - start} seconds.")
+        return all_video_frames, tokens_path
 
 
 def get_feature_extractor(args):
@@ -288,7 +296,7 @@ def main(args):
         mask_value=args.mask_value,
         resample_mode=args.resample_mode,
         corrupt_samples_log=args.corrupt_samples_log,
-        force_load_crop=args.force_load_crop,
+        force_new_crop=args.force_new_crop,
     )
 
     sampler = torch.utils.data.DistributedSampler(
@@ -310,46 +318,51 @@ def main(args):
     print("Starting tokenization")
     start_time = time.time()
 
-    if global_rank == 0 and args.verbose and not args.dryrun:
+    if global_rank == 0 and args.verbose:
         pbar = tqdm(total=len(data_loader))
     else:
-        pbar = None
+        pbar = None       
+        
+    # XXX: why is loading (__getitem__) so slow?
+    for videos_batch, tokens_paths in data_loader:
+        # NOTE: videos_batch is a batch of video shards (tar files), each containing a list of videos (of multiple/variable-length frames)
+        # processing files in this way ensures that shard structure is preserved.
 
-    for imgs_batch, tokens_paths in data_loader:
-        # Filter out already saved images
-        imgs_batch_filtered, tokens_paths_filtered = [], []
-        for imgs, tokens_path in zip(imgs_batch, tokens_paths):
-            # FIXME: this excludes already saved shards; do we want this?
+        # Filter out already saved video shards
+        videos_batch_filtered, tokens_paths_filtered = [], []
+        for imgs, tokens_path in zip(videos_batch, tokens_paths):
             if not os.path.exists(tokens_path) or args.corrupt_samples_log is not None:
-                imgs_batch_filtered.append(imgs)
+                videos_batch_filtered.append(imgs)
                 tokens_paths_filtered.append(tokens_path)
-        if len(imgs_batch_filtered) == 0:
+        if len(videos_batch_filtered) == 0:
             if pbar is not None:
                 pbar.update(1)
             continue
-        # imgs_batch = torch.stack(imgs_batch_filtered)
-        imgs_batch = imgs_batch_filtered
+        videos_batch = videos_batch_filtered
         tokens_paths = tokens_paths_filtered
+        print(f"Processing {len(videos_batch)} video shards.")
+        print("Processing video shards: ", tokens_paths)
 
         num_frames = []
-        for shard in imgs_batch:
+        for shard in videos_batch:
             num_frames.append([len(video) for video in shard])
 
-        # Merge batch and number of augmentation dimensions
         if "semseg" in args.task:
             raise NotImplementedError
-            imgs_batch = rearrange(imgs_batch, "b n h w -> (b n) h w")
+            # Merge batch and number of augmentation dimensions
+            videos_batch = rearrange(videos_batch, "b n h w -> (b n) h w")
         else:
             video_batch = []
             # unroll videos
-            for shard in imgs_batch:
+            for shard in videos_batch:
                 for video in shard:
                     video_batch.extend(video)
-            imgs_batch_merged = torch.stack(video_batch)
+            videos_batch_merged = torch.stack(video_batch)
         # merge batch and augmentation dimensions
-        imgs_batch_merged = rearrange(imgs_batch_merged, "b n c h w -> (b n) c h w")
+        # thus, dim 0 contains: all frames from all videos from all shards in the batch
+        videos_batch_merged = rearrange(videos_batch_merged, "b n c h w -> (b n) c h w")
         # For efficiency, process images with batch size that might be different from loader batch size or num augmentations
-        sub_batches = imgs_batch_merged.split(args.batch_size, dim=0)
+        sub_batches = videos_batch_merged.split(args.batch_size, dim=0)
 
         all_tokens = []
 
@@ -379,25 +392,34 @@ def main(args):
 
         all_tokens = np.concatenate(all_tokens)
         all_tokens = rearrange(all_tokens, "(b n) d -> b n d", n=args.n_crops)
-        # TODO: why is loading (__getiem__) so slow?
+        print(f"Tokenized {all_tokens.shape[0]} images.")
 
         # Split tokens back to num_frames
         tokens = []
-        all_tokens_cp = (
-            all_tokens.copy()
-        )  # FIXME: remove this copy when we have seen this works.
         for i, shard_num_frames in enumerate(num_frames):
             shard_tokens = []
             for j, num_frame in enumerate(shard_num_frames):
-                shard_tokens.append(all_tokens_cp[:num_frame])
-                all_tokens_cp = all_tokens_cp[num_frame:]
-                assert num_frame == len(imgs_batch[i][j])
-            assert len(shard_tokens) == len(imgs_batch[i])
+                shard_tokens.append(all_tokens[:num_frame])
+                all_tokens = all_tokens[num_frame:]
+                if num_frame != len(videos_batch[i][j]):
+                    raise ValueError(
+                        f"Expected num_frame to be {len(videos_batch[i][j])}, but got {num_frame}."
+                    )
+            if len(shard_tokens) != len(videos_batch[i]):
+                raise ValueError(
+                    f"Expected shard_tokens length to be {len(videos_batch[i])}, but got {len(shard_tokens)}."
+                )
             tokens.append(shard_tokens)
 
-        # FIXME: asserts can be removed after testing
-        assert len(tokens) == len(imgs_batch)
-        assert [len(video) for video in tokens] == [len(video) for video in imgs_batch]
+        if len(tokens) != len(videos_batch):
+            raise ValueError(
+                f"Expected tokens length to be {len(videos_batch)}, but got {len(tokens)}."
+            )
+
+        if [len(video) for video in tokens] != [len(video) for video in videos_batch]:
+            raise ValueError(
+                f"Expected tokens structure {[len(video) for video in videos_batch]}, but got {[len(video) for video in tokens]}."
+            )
 
         for shard_tokens, tokens_path in zip(tokens, tokens_paths):
             with tarfile.open(tokens_path, "w") as tar:
@@ -409,7 +431,6 @@ def main(args):
                         )
                     else:
                         with BytesIO() as bio:
-                            # TODO: is this efficient enough?
                             np.save(bio, video_tokens)
                             bio.seek(0)
                             tarinfo = tarfile.TarInfo(save_name)
@@ -449,10 +470,11 @@ if __name__ == "__main__":
         help="Number of crops to save. If 1, only a center crop will be saved. \
              If > 1, first image will be center cropped, the subsequent ones will be randomly cropped.",
     )
+    # TODO: 4m used 0.8, but this results in the same random crop for common resolution. --> 0.2?
     parser.add_argument(
         "--min_crop_scale",
         type=float,
-        default=0.8,
+        default=0.2,
         help="Minimum crop scale (Only for n_crops > 1)",
     )
     parser.add_argument("--input_size", type=int, default=224, help="Image size")
@@ -461,7 +483,7 @@ if __name__ == "__main__":
         "--mask_value",
         type=float,
         default=None,
-        help="Optionally set masked-out regions to this value after data augs (default: %(default)s)",
+        help="Optionally set masked-out regions to this value after data augs (default: %(default)s); currently not implemented/used!",
     )
     parser.add_argument(
         "--resample_mode",
@@ -490,8 +512,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--device",
-        default="cpu",
-        help="Device to use for tokenization",  # FIXME: use cuda by default (disabled due to debugging @todi)
+        default="cuda",
+        help="Device to use for tokenization",
     )
     parser.add_argument("--seed", default=0, type=int, help="Random seed")
     parser.add_argument(
@@ -500,25 +522,25 @@ if __name__ == "__main__":
         default="video_rgb_tok",
         help="Suffix to add to the folder under which the tokens are saved.",
     )
-    parser.add_argument("--num_workers", default=16, type=int)
+    parser.add_argument("--num_workers", default=6, type=int)
     parser.add_argument(
         "--pin_mem",
-        action="store_true",
+        default=False,
         help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
     )
     parser.add_argument("--no_pin_mem", action="store_false", dest="pin_mem", help="")
     parser.set_defaults(pin_mem=True)
     parser.add_argument(
         "--batch_size_dataloader",
-        default=64,
+        default=1,
         type=int,
-        help="Dataloader batch size (default: %(default)s)",
+        help="Dataloader batch size (default: %(default)s) (how many video shards to load at once in the dataloader)",
     )
     parser.add_argument(
         "--batch_size",
         default=64,
         type=int,
-        help="Batch size per GPU (default: %(default)s)",
+        help="Batch size per GPU (default: %(default)s) (how many frames to tokenize at once)",
     )
 
     # Distributed parameters
@@ -532,11 +554,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--force_load_crop",
-        action="store_true",
-        help="Make sure to load crops locally, otherwise break the code.",
+        "--force_new_crop",
+        default=True,  # FIXME: make false by default.
+        help="Create new crops, otherwise try to load.",
     )
 
     args = parser.parse_args()
-    print("Force loading existing crop settings: {}".format(args.force_load_crop))
+    print("Force loading existing crop settings: {}".format(args.force_new_crop))
     main(args)
