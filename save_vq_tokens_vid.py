@@ -64,6 +64,7 @@ class SaveVQDataset(Dataset):
         corrupt_samples_log: Optional[str] = None,
         dryrun: bool = False,
         force_new_crop: bool = False,
+        every_nth_frame: int = 1,
     ):
         super().__init__()
 
@@ -81,6 +82,7 @@ class SaveVQDataset(Dataset):
         self.mask_value = mask_value
         self.task_transforms = task_transforms
         self.resample_mode = resample_mode
+        self.every_nth_frame = every_nth_frame
 
         self.force_new_crop = force_new_crop
 
@@ -117,34 +119,38 @@ class SaveVQDataset(Dataset):
                     yield BytesIO(file_obj.read())
 
     def _extract_frames(self, video_bytes):
+        # ensure bytes stream is at beginning
         video_bytes.seek(0)
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        temp_file.write(video_bytes.read())
-        temp_file.close()
 
-        cap = cv2.VideoCapture(temp_file.name)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+            temp_file.write(video_bytes.read())
+            temp_file_name = temp_file.name
+
+        cap = cv2.VideoCapture(temp_file_name)
+        # print(cap.get(5))  # gets fps if needed
         if not cap.isOpened():
+            os.remove(temp_file_name)
             raise ValueError("Failed to open video stream from bytes")
 
         frame_count = 0
 
-        while True:
-            # FIXME: artificial downsampling for now, remove when having actual shards!
-            if frame_count % 10 == 0:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame = Image.fromarray(frame)
-                yield frame  # Yield each frame one by one
-            else:
-                ret = cap.grab()
-                if not ret:
-                    break
-            frame_count += 1
-
-        cap.release()
-        os.remove(temp_file.name)
+        try:
+            while True:
+                if frame_count % self.every_nth_frame == 0:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = Image.fromarray(frame)
+                    yield frame
+                else:
+                    ret = cap.grab()
+                    if not ret:
+                        break
+                frame_count += 1
+        finally:
+            cap.release()
+            os.remove(temp_file_name)
 
     def __len__(self):
         return len(self.samples)
@@ -164,6 +170,11 @@ class SaveVQDataset(Dataset):
                 (n_frames, n_crops, c, h, w), where c=3, h=w=224 (=input_size; due to tokenizer)
             str: Path to the current shard of videos (tokenized/output).
         """
+        # FIXME: remove
+        print(index)
+        
+        rank = torch.distributed.get_rank()
+        print(rank)
 
         path, _ = self.samples[index]
         videos = self.loader(path, VIDEO_EXTENSIONS)
@@ -188,15 +199,10 @@ class SaveVQDataset(Dataset):
         # Perform augmentations and optionally mask images
         v_idx = 0
         for video in videos:
-            # FIXME: remove break at 20 + printing
-            if v_idx > 30:
+            if v_idx > 10:
                 break
-            if index == 0:
-                print("in loop", v_idx)
             video_frames = self._extract_frames(video)
 
-            if index == 0:
-                print("got frames", v_idx)
             # Create or load crop settings
             if os.path.exists(crop_settings_path) and not self.force_new_crop:
                 try:
@@ -225,8 +231,6 @@ class SaveVQDataset(Dataset):
                     os.makedirs(os.path.dirname(crop_settings_path), exist_ok=True)
                     np.save(crop_settings_path, settings)
             current_video = []
-            if index == 0:
-                print("looping over frames", v_idx)
             for frame in video_frames:
                 current_frame = []
                 for i, j, h, w, h_flip in settings:
@@ -241,14 +245,14 @@ class SaveVQDataset(Dataset):
                         self.resample_mode,
                     )
                     img_mod = self.task_transforms[self.task].postprocess(img_mod)
+                    # FIXME: can we do to fp16?
+                    img_mod = img_mod.half()
                     current_frame.append(img_mod)
 
                     if self.mask_value is not None:
                         raise NotImplementedError
 
                 current_video.append(torch.stack(current_frame))
-            if index == 0:
-                print("done video: ", v_idx)
             all_video_frames.append(torch.stack(current_video))
             v_idx += 1
 
@@ -301,6 +305,7 @@ def main(args):
         resample_mode=args.resample_mode,
         corrupt_samples_log=args.corrupt_samples_log,
         force_new_crop=args.force_new_crop,
+        every_nth_frame=args.every_nth_frame,
     )
 
     sampler = torch.utils.data.DistributedSampler(
@@ -319,6 +324,8 @@ def main(args):
     if feature_extractor is not None:
         feature_extractor.to(device)
 
+    time.sleep(1)
+    
     print("Starting tokenization")
     start_time = time.time()
 
@@ -327,7 +334,6 @@ def main(args):
     else:
         pbar = None
 
-    # XXX: why is loading (__getitem__) so slow?
     for videos_batch, tokens_paths in data_loader:
         # NOTE: videos_batch is a batch of video shards (tar files), each containing a list of videos (of multiple/variable-length frames)
         # processing files in this way ensures that shard structure is preserved.
@@ -373,6 +379,8 @@ def main(args):
         for sub_batch in tqdm(
             sub_batches, "Tokenizing batch", disable=not args.verbose
         ):
+            # back to fp32
+            sub_batch = sub_batch.float()
             sub_batch = sub_batch.to(device)
 
             with torch.no_grad():
@@ -552,6 +560,12 @@ if __name__ == "__main__":
         "--force_new_crop",
         default=True,  # FIXME: make false by default.
         help="Create new crops, otherwise try to load.",
+    )
+    parser.add_argument(
+        "--every_nth_frame",
+        default=10,
+        type=int,
+        help="Only tokenize every nth frame of the video.",
     )
 
     args = parser.parse_args()
