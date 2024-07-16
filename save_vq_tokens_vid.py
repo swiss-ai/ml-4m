@@ -221,6 +221,7 @@ class SaveVQDataset(Dataset):
 
                 # Subsequent crops are random
                 for _ in range(1, self.n_crops):
+                    # TODO: replace next(...)
                     crop_coords, h_flip, _, _, _ = self.random_crop_augmenter(
                         {self.task: next(video_frames)}, None
                     )
