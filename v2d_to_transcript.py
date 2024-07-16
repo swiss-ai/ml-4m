@@ -18,6 +18,7 @@ def timestamp_to_frames(timestamp, fps):
 
 def process_tar_files(source_directory, target_directory, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
+    # TODO: this path
     # source_directory = os.path.join(source_directory, "video_rgb")
     target_directory = os.path.join(target_directory, "transcripts")
 
@@ -39,13 +40,12 @@ def process_tar_files(source_directory, target_directory, skip_existing=True):
                 try:
                     tar.extractall(path=temp_dir)
 
-                    # Process all JSON files extracted
+                    # process json files
                     for root, dirs, files in os.walk(temp_dir):
                         for file in files:
                             if file.endswith(".json"):
                                 process_json_file(os.path.join(root, file), temp_dir)
 
-                    # Repackage into new TAR file
                     with tarfile.open(target_tar_path, "w") as out_tar:
                         for root, dirs, files in os.walk(temp_dir):
                             for file in files:
@@ -108,7 +108,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Process TAR files with JSONs and convert to structured JSONL format."
+        description="Process tarfiles contati JSONs and convert to structured JSONL format."
     )
 
     parser.add_argument(
@@ -116,12 +116,12 @@ if __name__ == "__main__":
         type=str,
         # FIXME: default dir
         default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
-        help="Directory containing the JSON files to process.",
+        help="Dir containing the JSON files to process.",
     )
     parser.add_argument(
         "--skip_existing",
         default=False,  # FIXME
-        help="Skip processing TAR files that have already been processed and exist in the target directory.",
+        help="Skip tarfiles already processed (exist in the target directory).",
     )
 
     args = parser.parse_args()
