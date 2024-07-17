@@ -62,15 +62,14 @@ def process_json_file(json_file_path, output_dir):
         video_key = os.path.splitext(os.path.basename(json_file_path))[0]
 
         if data["status"] != "success":
-            # TODO: what to do with videos that errored when downloading?
+            # errored while downloading
             return
         elif "subtitles" not in data["yt_meta_dict"]:
+            print(data)
             # TODO: what to do with videos that have no subtitles? When can this occur?
             return
         if data["yt_meta_dict"]["subtitles"].keys() != {"en"}:
-            # TODO: what to do with non-English videos?
-            # TODO: what to do with videos w/o a transcript? When does this occur?
-            print(data["yt_meta_dict"]["subtitles"].keys())
+            # XXX: for now, we decided to only exclude non-English videos
             return
         subtitles = data["yt_meta_dict"]["subtitles"]["en"]
         fps = data["yt_meta_dict"]["info"]["fps"]
@@ -115,7 +114,8 @@ if __name__ == "__main__":
         "--data_root",
         type=str,
         # FIXME: default dir
-        default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
+        # default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
+        default="/cluster/work/cotterell/mfrohmann/ml-4m/data/DEBUG/1000_hd_vila_shuffled",
         help="Dir containing the JSON files to process.",
     )
     parser.add_argument(
