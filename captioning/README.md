@@ -89,7 +89,7 @@ Here what really matters, beyond the model quality, is what the training data lo
 
 [VidChapters](https://github.com/antoyang/VidChapters) has a very large training dataset and has available checkpoints. See [paper](https://proceedings.neurips.cc/paper_files/paper/2023/file/9b5c3e00d6ed30aad7adac9e7a664de1-Paper-Datasets_and_Benchmarks.pdf). But it splits by "chapters", which seems to be very long scenes.
 
-[VideoRecap](https://github.com/md-mohaiminul/VideoRecap)
+[VideoRecap](https://github.com/md-mohaiminul/VideoRecap): see [paper](https://arxiv.org/pdf/2402.13250).  
 "augmenting Ego4D with long-range video summaries of hour-long videos. This leads to a hierarchical video captioning dataset consisting of short clip captions, medium-range segment descriptions, and long-range video summaries."
 
 Follow installation script, very easy demo.
@@ -97,7 +97,7 @@ Follow installation script, very easy demo.
 
 # Evaluation
 
-What are the standard benchmarks for long video captioning?
+What are the standard benchmarks for long video captioning? e.g. [MAS-QA, Ego-QA](https://arxiv.org/pdf/2405.19723)
 
 How to compare the obtained captions on our own data, without gold captions?
 
