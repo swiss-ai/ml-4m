@@ -19,7 +19,7 @@ METADATA_MAPPING = {
 }
 
 
-def process_tar_files(source_directory, target_directory, skip_existing=True):
+def process_tar_files(source_directory, target_directory, dataset, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
     # TODO: this path
     # source_directory = os.path.join(source_directory, "video_rgb")
@@ -47,7 +47,7 @@ def process_tar_files(source_directory, target_directory, skip_existing=True):
                     for root, dirs, files in os.walk(temp_dir):
                         for file in files:
                             if file.endswith(".json"):
-                                process_json_file(os.path.join(root, file), temp_dir)
+                                process_json_file(os.path.join(root, file), temp_dir, dataset)
 
                     with tarfile.open(target_tar_path, "w") as out_tar:
                         for root, dirs, files in os.walk(temp_dir):
@@ -58,7 +58,7 @@ def process_tar_files(source_directory, target_directory, skip_existing=True):
                     shutil.rmtree(temp_dir)
 
 
-def process_json_file(json_file_path, output_dir):
+def process_json_file(json_file_path, output_dir, dataset):
     """Reads and processes a single JSON file to convert it to the required format."""
     with open(json_file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
@@ -83,9 +83,9 @@ def process_json_file(json_file_path, output_dir):
             if value in data["yt_meta_dict"]["info"]:
                 json_content[key] = data["yt_meta_dict"]["info"][value]
         
+        json_content["dataset"] = dataset
         json_filename = f"{video_key}.json"
         with open(os.path.join(output_dir, json_filename), "w") as outfile:
-            print(outfile)
             json.dump(json_content, outfile, indent=4)
 
 
@@ -99,6 +99,7 @@ def main(args):
                     folder,
                 ),
                 target_directory=os.path.join(args.data_root, folder),
+                dataset=args.dataset,
                 skip_existing=args.skip_existing,
             )
 
@@ -120,6 +121,13 @@ if __name__ == "__main__":
         "--skip_existing",
         default=False,  # FIXME
         help="Skip tarfiles already processed (exist in the target directory).",
+    )
+    # TODO: is this also in filestructure or do we have to provide it like this?
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        help="Which dataset tar is coming from (HDVILA/HowTo100M)"
     )
 
     args = parser.parse_args()
