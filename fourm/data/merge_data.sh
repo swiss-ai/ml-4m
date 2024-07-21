@@ -7,7 +7,8 @@ OUTPUT_DIR="/store/swissai/a08/data/4m/video_rgb"
 
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
-
+secs=$SECONDS
+hrs=$(( secs/3600 )); mins=$(( (secs-hrs*3600)/60 )); secs=$(( secs-hrs*3600-mins*60 ))
 # Process HowTo100M files
 for file in "$HOWTO_DIR"/*.tar; do
     filename=$(basename "$file")
@@ -44,3 +45,4 @@ for file in "$HDVILA_DIR"/*.tar; do
 done
 
 echo "Merging complete. Output files are in $OUTPUT_DIR"
+echo "Time spent: %02d:%02d:%02d\n' $hrs $mins $secs"
