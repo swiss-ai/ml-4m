@@ -23,11 +23,12 @@ def process_tar_files(source_directory, target_directory, dataset, skip_existing
     """Extract, process, and re-package JSON files in TAR archives."""
     # TODO: this path
     # source_directory = os.path.join(source_directory, "video_rgb")
-    target_directory = os.path.join(target_directory, "metadata")
+    target_directory = os.path.join(target_directory, "video_metadata")
 
     os.makedirs(target_directory, exist_ok=True)
 
     for tar_path in os.listdir(source_directory):
+        print(source_directory)
         if tar_path.endswith(".tar"):
             shard_name = "shard-" + os.path.splitext(tar_path)[0] + ".tar"
             target_tar_path = os.path.join(target_directory, shard_name)
@@ -106,7 +107,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Process tarfiles contati JSONs and convert to structured JSONL format."
+        description="Process tarfiles containing JSONs and convert to structured JSONL format."
     )
 
     parser.add_argument(
@@ -114,7 +115,7 @@ if __name__ == "__main__":
         type=str,
         # FIXME: default dir
         # default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
-        default="/cluster/work/cotterell/mfrohmann/data/v2d/howto100m",
+        default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
         help="Dir containing the JSON files to process.",
     )
     parser.add_argument(

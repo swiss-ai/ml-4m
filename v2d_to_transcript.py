@@ -8,11 +8,10 @@ from datetime import timedelta
 
 
 def timestamp_to_frames(timestamp, fps):
-    """Converts a timestamp in the format 'HH:MM:SS.mss' into a frame count."""
-    # TODO: check correctness of this conversion
-    hrs, mins, secs = map(float, timestamp.split(":"))
-    total_seconds = timedelta(hours=hrs, minutes=mins, seconds=secs).total_seconds()
-    # TODO: is round the right way of doing this? Most transcripts are assigned to only 1-2 frames...
+    """Converts a timestamp in the format 'min.ms' into a frame count."""
+    total_seconds = float(timestamp)
+    print(total_seconds)
+    # TODO: right-exlusive, left-inclusive.
     return round(total_seconds * fps)
 
 
@@ -20,7 +19,7 @@ def process_tar_files(source_directory, target_directory, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
     # TODO: this path
     # source_directory = os.path.join(source_directory, "video_rgb")
-    target_directory = os.path.join(target_directory, "transcripts")
+    target_directory = os.path.join(target_directory, "video_transcript")
 
     os.makedirs(target_directory, exist_ok=True)
 
@@ -71,18 +70,32 @@ def process_json_file(json_file_path, output_dir):
         if data["yt_meta_dict"]["subtitles"].keys() != {"en"}:
             # XXX: for now, we decided to only exclude non-English videos
             return
-        subtitles = data["yt_meta_dict"]["subtitles"]["en"]
+        subtitles = data["whisper_alignment"]["segments"]
         fps = data["yt_meta_dict"]["info"]["fps"]
 
         json_content = []
         for subtitle in subtitles:
             start_frame = timestamp_to_frames(subtitle["start"], fps)
             end_frame = timestamp_to_frames(subtitle["end"], fps)
+            sentence = subtitle["text"]
+            word_timestamps = []
+            for word in subtitle["words"]:
+                word_timestamps.append(
+                    {
+                        "word": word["word"],
+                        "start": timestamp_to_frames(word["start"], fps)
+                        if "start" in word.keys() else None,
+                        "end": timestamp_to_frames(word["end"], fps)
+                        if "end" in word.keys() else None,
+                    }
+                )
+
             json_content.append(
                 {
-                    "transcript": " ".join(subtitle["lines"]),
-                    "start_frame_index": start_frame,
-                    "end_frame_index": end_frame,
+                    "sentence": sentence,
+                    "start": start_frame,
+                    "end": end_frame,
+                    "words": word_timestamps,
                 }
             )
 
@@ -94,12 +107,10 @@ def process_json_file(json_file_path, output_dir):
 def main(args):
     for folder in os.listdir(args.data_root):
         if folder in ["train", "val", "test"]:
-            print(f"Processing {folder}.")
+            current_folder = os.path.join(args.data_root, folder, args.whisper_dir)
+            print(f"Processing {current_folder}.")
             process_tar_files(
-                source_directory=os.path.join(
-                    args.data_root,
-                    folder,
-                ),
+                source_directory=current_folder,
                 target_directory=os.path.join(args.data_root, folder),
                 skip_existing=args.skip_existing,
             )
@@ -107,7 +118,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Process tarfiles contati JSONs and convert to structured JSONL format."
+        description="Process tarfiles containing JSONs and convert to structured JSONL format."
     )
 
     parser.add_argument(
@@ -115,8 +126,14 @@ if __name__ == "__main__":
         type=str,
         # FIXME: default dir
         # default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
-        default="/cluster/work/cotterell/mfrohmann/data/v2d/howto100m",
+        default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
         help="Dir containing the JSON files to process.",
+    )
+    parser.add_argument(
+        "--whisper_dir",
+        type=str,
+        default="whisperx",
+        help="Dir containing the WhisperX transcripts.",
     )
     parser.add_argument(
         "--skip_existing",
