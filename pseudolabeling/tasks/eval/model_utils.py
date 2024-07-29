@@ -103,7 +103,6 @@ def load_pllava(repo_id, num_frames, use_lora=False, weight_dir=None, lora_alpha
             print("no model")
             # print(state_dict)
             msg = model.load_state_dict(state_dict, strict=False, assign=True)
-        print(msg)
     # dispatch model weight
     print("dispatching")
     if use_multi_gpus:
@@ -123,7 +122,7 @@ def load_pllava(repo_id, num_frames, use_lora=False, weight_dir=None, lora_alpha
         )
 
         dispatch_model(model, device_map=device_map)
-        print(model.hf_device_map)
+        # print(model.hf_device_map)
 
     model = model.eval()
 
