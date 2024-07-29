@@ -11,3 +11,10 @@ wandb/
 tokenizer_ckpts/
 *pkl
 *.egg-info
+*.tar
+*.mp4
+*.npy
+*.m4a
+*.json
+*.jsonl
+*.safetensors
