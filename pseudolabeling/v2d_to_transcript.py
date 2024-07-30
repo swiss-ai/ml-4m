@@ -84,9 +84,11 @@ def process_json_file(json_file_path, output_dir):
                     {
                         "word": word["word"],
                         "start": timestamp_to_frames(word["start"], fps)
-                        if "start" in word.keys() else None,
+                        if "start" in word.keys()
+                        else None,
                         "end": timestamp_to_frames(word["end"], fps)
-                        if "end" in word.keys() else None,
+                        if "end" in word.keys()
+                        else None,
                     }
                 )
 

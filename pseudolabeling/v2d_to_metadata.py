@@ -48,7 +48,9 @@ def process_tar_files(source_directory, target_directory, dataset, skip_existing
                     for root, dirs, files in os.walk(temp_dir):
                         for file in files:
                             if file.endswith(".json"):
-                                process_json_file(os.path.join(root, file), temp_dir, dataset)
+                                process_json_file(
+                                    os.path.join(root, file), temp_dir, dataset
+                                )
 
                     with tarfile.open(target_tar_path, "w") as out_tar:
                         for root, dirs, files in os.walk(temp_dir):
@@ -66,7 +68,7 @@ def process_json_file(json_file_path, output_dir, dataset):
         # remove filepath of json
         os.remove(json_file_path)
         video_key = os.path.splitext(os.path.basename(json_file_path))[0]
-        
+
         json_content = {}
 
         if data["status"] != "success":
@@ -83,7 +85,7 @@ def process_json_file(json_file_path, output_dir, dataset):
         for key, value in METADATA_MAPPING.items():
             if value in data["yt_meta_dict"]["info"]:
                 json_content[key] = data["yt_meta_dict"]["info"][value]
-        
+
         json_content["dataset"] = dataset
         json_filename = f"{video_key}.json"
         with open(os.path.join(output_dir, json_filename), "w") as outfile:
@@ -128,7 +130,7 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         required=True,
-        help="Which dataset tar is coming from (HDVILA/HowTo100M)"
+        help="Which dataset tar is coming from (HDVILA/HowTo100M)",
     )
 
     args = parser.parse_args()
