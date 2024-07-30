@@ -148,7 +148,6 @@ def single_test(model, processor, vid_path, num_frames=4, conv_mode="plain"):
         vid, msg = None, "num_frames is 0, not inputing image"
     img_list = vid
 
-
     query_background = (
         "You are to assist me in accomplishing a task about the input video. Reply to me with a precise yet detailed response. For how you would succeed in the recaptioning task, read the following Instructions section and Then, make your response with a elaborate paragraph.\n"
         "# Instructions\n"

@@ -13,8 +13,9 @@ def upload(repo_id, local_dir, path_in_repo, repo_type, token):
         folder_path=local_dir,
         path_in_repo=path_in_repo,
         token=token,
-        repo_type=repo_type
+        repo_type=repo_type,
     )
+
 
 def download(repo_id, local_dir, repo_type, token, filter_re=None):
     files = huggingface_hub.list_repo_files(repo_id, repo_type=repo_type, token=token)
@@ -27,10 +28,10 @@ def download(repo_id, local_dir, repo_type, token, filter_re=None):
         repo_type=repo_type,
         local_dir=local_dir,
         local_dir_use_symlinks=True,
-        token=token
+        token=token,
     )
     pool.map(download_func, files)
-    print(f'downloaded files {files}')
+    print(f"downloaded files {files}")
 
 
 def upload_file(repo_id, file_path, repo_type, token):
@@ -42,14 +43,14 @@ def upload_file(repo_id, file_path, repo_type, token):
         repo_type=repo_type,
     )
 
-if __name__ == '__main__':
-    read_token = '...'
-    write_token = '...'
-    repo_id = '...'
-    local_dir = '...'
-    repo_type = '...'
-    
-    
+
+if __name__ == "__main__":
+    read_token = "..."
+    write_token = "..."
+    repo_id = "..."
+    local_dir = "..."
+    repo_type = "..."
+
     # #############
     # # Examples on most simple hf usage
     # # downlaod
@@ -66,15 +67,15 @@ if __name__ == '__main__':
 
     # download models
     repo_ids = [
-        'ermu2001/pllava-7b',
-        'ermu2001/pllava-13b',
+        "ermu2001/pllava-7b",
+        "ermu2001/pllava-13b",
     ]
     for repo_id in repo_ids:
-        local_dir = repo_id.replace('ermu2001', 'MODELS')
+        local_dir = repo_id.replace("ermu2001", "MODELS")
         snapshot_download(
             repo_id,
             local_dir=local_dir,
-            repo_type='model',
+            repo_type="model",
             local_dir_use_symlinks=True,
             # token=read_token,
         )

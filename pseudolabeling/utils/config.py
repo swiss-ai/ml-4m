@@ -84,7 +84,8 @@ class Config(object):
         parser = argparse.ArgumentParser()
         # parser.add_argument("--cfg", help="load configs from yaml file", default="", type=str)
         parser.add_argument(
-            "config_file", help="the configuration file to load. support: .yaml, .json, .py"
+            "config_file",
+            help="the configuration file to load. support: .yaml, .json, .py",
         )
         parser.add_argument(
             "opts",
@@ -121,10 +122,13 @@ class Config(object):
             raise IOError(f"File does not exist: {filepath}")
         if filepath.endswith(".py"):
             with tempfile.TemporaryDirectory() as temp_config_dir:
-
-                shutil.copytree(osp.dirname(filepath), osp.join(temp_config_dir, "tmp_config"))
+                shutil.copytree(
+                    osp.dirname(filepath), osp.join(temp_config_dir, "tmp_config")
+                )
                 sys.path.insert(0, temp_config_dir)
-                mod = import_module("tmp_config." + osp.splitext(osp.basename(filepath))[0])
+                mod = import_module(
+                    "tmp_config." + osp.splitext(osp.basename(filepath))[0]
+                )
                 # mod = import_module(temp_module_name)
                 sys.path.pop(0)
                 cfg_dict = {
@@ -188,7 +192,9 @@ class Config(object):
             sub_d = cfg
             for i, k in enumerate(keys):
                 if not hasattr(sub_d, k):
-                    raise ValueError(f"The key {k} not exist in the config. Full key:{full_k}")
+                    raise ValueError(
+                        f"The key {k} not exist in the config. Full key:{full_k}"
+                    )
                 if i != len(keys) - 1:
                     sub_d = sub_d[k]
                 else:

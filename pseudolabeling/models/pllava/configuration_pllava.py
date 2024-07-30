@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Llava model configuration"""
+"""Llava model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
@@ -89,10 +89,10 @@ class PllavaConfig(PretrainedConfig):
         vision_feature_select_strategy="default",
         vision_feature_layer=-2,
         vocab_size=32000,
-        pooling_method='avg',
+        pooling_method="avg",
         pooling_shape=(8, 16, 16),
-        frame_shape=(24, 24), # llava 1.5 pretrained frame shape
-        num_frames=1, # llava 1.5 pretrained frame shape
+        frame_shape=(24, 24),  # llava 1.5 pretrained frame shape
+        num_frames=1,  # llava 1.5 pretrained frame shape
         use_pooling=True,
         gradient_checkpointing=False,
         **kwargs,
@@ -105,18 +105,22 @@ class PllavaConfig(PretrainedConfig):
         self.vocab_size = vocab_size
         self.use_pooling = use_pooling
         self.gradient_checkpointing = gradient_checkpointing
-        
+
         self.vision_config = vision_config
-        
-        self.pooling_method = pooling_method # should be in 'max', 'avg'
-        self.pooling_shape = pooling_shape # 
-        self.frame_shape = frame_shape # 
+
+        self.pooling_method = pooling_method  # should be in 'max', 'avg'
+        self.pooling_shape = pooling_shape  #
+        self.frame_shape = frame_shape  #
         self.num_frames = num_frames
         if isinstance(self.vision_config, dict):
             vision_config["model_type"] = (
-                vision_config["model_type"] if "model_type" in vision_config else "clip_vision_model"
+                vision_config["model_type"]
+                if "model_type" in vision_config
+                else "clip_vision_model"
             )
-            self.vision_config = CONFIG_MAPPING[vision_config["model_type"]](**vision_config)
+            self.vision_config = CONFIG_MAPPING[vision_config["model_type"]](
+                **vision_config
+            )
         elif vision_config is None:
             self.vision_config = CONFIG_MAPPING["clip_vision_model"](
                 intermediate_size=4096,
@@ -131,19 +135,22 @@ class PllavaConfig(PretrainedConfig):
         self.vocab_size = self.vocab_size
 
         self.text_config = text_config
-        
+
         if isinstance(self.text_config, dict):
-            text_config["model_type"] = text_config["model_type"] if "model_type" in text_config else "llama"
+            text_config["model_type"] = (
+                text_config["model_type"] if "model_type" in text_config else "llama"
+            )
             self.text_config = CONFIG_MAPPING[text_config["model_type"]](**text_config)
             self.vocab_size = self.text_config.vocab_size
             self.text_config.gradient_checkpointing = self.gradient_checkpointing
-            
+
         elif text_config is None:
-            tmp_config = {"_attn_implementation":"flash_attention_2",
-                          "gradient_checkpointing": self.gradient_checkpointing}
+            tmp_config = {
+                "_attn_implementation": "flash_attention_2",
+                "gradient_checkpointing": self.gradient_checkpointing,
+            }
             self.text_config = CONFIG_MAPPING["llama"](**tmp_config)
             self.text_config.gradient_checkpointing = self.gradient_checkpointing
         # self.text_config["_attn_implementation"]="flash_attention_2"  # xl: temporal hard code
-        
 
         super().__init__(**kwargs)

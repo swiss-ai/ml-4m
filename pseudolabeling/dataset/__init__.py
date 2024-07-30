@@ -15,7 +15,7 @@ def get_media_type(dataset_config):
 
 
 def create_dataset(dataset_type, config):
-    if "clip" in config.model.get("vit_model", 'vit'):
+    if "clip" in config.model.get("vit_model", "vit"):
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
     else:
@@ -80,7 +80,9 @@ def create_dataset(dataset_type, config):
     elif dataset_type in ["it_train"]:
         # convert to list of lists
         train_files = (
-            [config.train_file] if isinstance(config.train_file[0], str) else config.train_file
+            [config.train_file]
+            if isinstance(config.train_file[0], str)
+            else config.train_file
         )
         train_media_types = sorted(list({get_media_type(e) for e in train_files}))
 
@@ -101,29 +103,31 @@ def create_dataset(dataset_type, config):
                     clip_transform=config.preprocess.get("clip_transform", False),
                     random_shuffle=config.preprocess.get("random_shuffle", True),
                     system=config.preprocess.get("system", ""),
-                    role=config.preprocess.get('roles', ("Human", "Assistant")),
-                    end_signal=config.preprocess.get('end_signal', "###"),
-                    begin_signal=config.preprocess.get('begin_signal', ""),
+                    role=config.preprocess.get("roles", ("Human", "Assistant")),
+                    end_signal=config.preprocess.get("end_signal", "###"),
+                    begin_signal=config.preprocess.get("begin_signal", ""),
                 )
                 if m == "video":
-                    video_only_dataset_kwargs_train.update({
-                        "start_token": config.model.get("start_token", "<Video>"),
-                        "end_token": config.model.get("end_token", "</Video>"),
-                    })
+                    video_only_dataset_kwargs_train.update(
+                        {
+                            "start_token": config.model.get("start_token", "<Video>"),
+                            "end_token": config.model.get("end_token", "</Video>"),
+                        }
+                    )
                     dataset_kwargs.update(video_only_dataset_kwargs_train)
                     if "tgif" in train_file[1]:
-                        video_only_dataset_kwargs_train.update({
-                            "video_reader_type": "gif"
-                        })
+                        video_only_dataset_kwargs_train.update(
+                            {"video_reader_type": "gif"}
+                        )
                         dataset_kwargs.update(video_only_dataset_kwargs_train)
                     elif "webvid" in train_file[1]:
-                        video_only_dataset_kwargs_train.update({
-                            "video_reader_type": "hdfs"
-                        })
+                        video_only_dataset_kwargs_train.update(
+                            {"video_reader_type": "hdfs"}
+                        )
                     else:
-                        video_only_dataset_kwargs_train.update({
-                            "video_reader_type": "decord"
-                        })
+                        video_only_dataset_kwargs_train.update(
+                            {"video_reader_type": "decord"}
+                        )
                     dataset_kwargs.update(video_only_dataset_kwargs_train)
                 datasets.append(dataset_cls(**dataset_kwargs))
             dataset = ConcatDataset(datasets)
@@ -155,4 +159,3 @@ def create_loader(datasets, samplers, batch_size, num_workers, is_trains, collat
         )
         loaders.append(loader)
     return loaders
-

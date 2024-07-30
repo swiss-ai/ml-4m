@@ -54,12 +54,14 @@ query_action_base = (
     "Describe the main characters and actions in the provided video, without mentioning the background.\n"
 )
 
+
 def find_image_extension(root_dir):
     for root, dirs, files in os.walk(root_dir):
         for file in files:
             if file:
                 return os.path.splitext(file)[1]
     return None
+
 
 def get_index(num_frames, num_segments):
     seg_size = float(num_frames - 1) / num_segments
@@ -68,7 +70,8 @@ def get_index(num_frames, num_segments):
         [start + int(np.round(seg_size * idx)) for idx in range(num_segments)]
     )
     return offsets
-    
+
+
 @dataclasses.dataclass
 class MetaDataRGBClass:
     # string, but default is None
@@ -122,27 +125,39 @@ class SaveVQDataset(Dataset):
         metadata_idx = self.class_to_idx[metadata_dir]
         self.samples = []
         # ensure both idcs have the same tarfiles
+        # for sample in self.all_samples:
+        #     print(sample)
+        #     if sample[1] == metadata_idx:
+        #         # TODO: should we call shards "shard-000.tar" or just "000.tar" (CURRENTLY INCONSISTENT)
+        #         self.samples.append(
+        #             MetaDataRGBClass(
+        #                 metadata_dir=sample[0],
+        #                 shard=sample[0].split("/")[-1].split("-")[-1],
+        #             )
+        #         )
+        # for sample in self.all_samples:
+        #     if sample[1] == video_rgb_idx:
+        #         # check self.samples and see if there is a matching .tar
+        #         shard = sample[0].split("/")[-1]
+        #         for self_sample in self.samples:
+        #             if self_sample.shard == shard:
+        #                 self_sample.video_rgb_dir = sample[0]
+        #                 break
+        # for sample in self.samples:
+        #     if sample.metadata_dir is None or sample.video_rgb_dir is None:
+        #         print(f"Could not find matching metadata and video_rgb for {sample}")
+
+        # only use samples from video_rgb_idx
         for sample in self.all_samples:
-            if sample[1] == metadata_idx:
+            print(sample)
+            if sample[1] == video_rgb_idx:
                 # TODO: should we call shards "shard-000.tar" or just "000.tar" (CURRENTLY INCONSISTENT)
                 self.samples.append(
                     MetaDataRGBClass(
-                        metadata_dir=sample[0],
+                        video_rgb_dir=sample[0],
                         shard=sample[0].split("/")[-1].split("-")[-1],
                     )
                 )
-        for sample in self.all_samples:
-            if sample[1] == video_rgb_idx:
-                # check self.samples and see if there is a matching .tar
-                shard = sample[0].split("/")[-1]
-                for self_sample in self.samples:
-                    if self_sample.shard == shard:
-                        self_sample.video_rgb_dir = sample[0]
-                        break
-        for sample in self.samples:
-            if sample.metadata_dir is None or sample.video_rgb_dir is None:
-                print(f"Could not find matching metadata and video_rgb for {sample}")
-
         self.samples = [dataclasses.asdict(sample) for sample in self.samples]
 
     def loader(self, path, extensions):
@@ -167,40 +182,6 @@ class SaveVQDataset(Dataset):
 
                     with tar.extractfile(member) as file_obj:
                         yield BytesIO(file_obj.read()), json_dict
-
-    def _extract_frames(self, video_bytes):
-        # ensure bytes stream is at beginning
-        video_bytes.seek(0)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
-            temp_file.write(video_bytes.read())
-            temp_file_name = temp_file.name
-
-        cap = cv2.VideoCapture(temp_file_name)
-        # print(cap.get(5))  # gets fps if needed
-        if not cap.isOpened():
-            os.remove(temp_file_name)
-            raise ValueError("Failed to open video stream from bytes")
-
-        frame_count = 0
-
-        try:
-            while True:
-                if frame_count % self.every_nth_frame == 0:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame = Image.fromarray(frame)
-                    yield frame
-                else:
-                    ret = cap.grab()
-                    if not ret:
-                        break
-                frame_count += 1
-        finally:
-            cap.release()
-            os.remove(temp_file_name)
 
     def load_video(self, video, cuts):
         # TODO: check resolution
@@ -270,9 +251,10 @@ class SaveVQDataset(Dataset):
             if cut_json["status"] != "success":
                 print("FAIL: ", cut_json)
                 continue
+            # FIXME: Remove
             v_idx += 1
-            # if v_idx > 2:
-            #     break
+            if v_idx > 2:
+                break
             cuts = cut_json["cuts"]["cuts_original_fps"]
             print(cuts)
             full_video = self.load_video(video=video, cuts=cuts)
@@ -326,7 +308,7 @@ def main(args):
         lora_alpha=4,  # TODO: double-check
         weight_dir=args.pllava_dir,
     )
-    
+
     conv = conv_templates[args.conv_mode].copy()
     conv.user_query(query_action_base, None, None, is_mm=True)
 
@@ -380,7 +362,6 @@ def main(args):
         # processing files in this way ensures that shard structure is preserved.
 
         # Filter out already saved video shards
-        pdb.set_trace()
         videos_batch_filtered, tar_paths_filtered = [], []
         for imgs, tar_path in zip(videos_batch, tar_paths):
             if not os.path.exists(tar_path) or args.corrupt_samples_log is not None:
@@ -394,7 +375,6 @@ def main(args):
         tar_paths = tar_paths_filtered
         print(f"Processing {len(videos_batch)} video shards.")
         print("Processing video shards: ", tar_paths)
-        
 
         all_captions = []
         print(conv)
@@ -406,6 +386,7 @@ def main(args):
             for video in shard:
                 video_caption = []
                 for clip in video:
+                    pdb.set_trace()
                     llm_response, _ = pllava_answer(
                         conv=conv,
                         model=model,
@@ -425,11 +406,10 @@ def main(args):
             all_captions.append(shard_caption)
             # TODO: "In the image" --> too short scenes?
             # TODO: add len of clip/num_clip_frames to prompt?
-        
-                
+
         pdb.set_trace()
         print(f"Tokenized video shards.")
-        
+
         print("Saving tokenized video shards to disk.")
         # TODO: save, to jsonl? How? Add other info like clips
         for shard_captions, tar_path in zip(all_captions, tar_paths):

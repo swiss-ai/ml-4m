@@ -8,6 +8,7 @@ from dataset.utils import load_image_from_path
 
 try:
     from petrel_client.client import Client
+
     has_client = True
 except ImportError:
     has_client = False
@@ -32,7 +33,7 @@ class ImageVideoBaseDataset(Dataset):
 
         self.client = None
         if has_client:
-            self.client = Client('~/petreloss.conf')
+            self.client = Client("~/petreloss.conf")
 
     def __getitem__(self, index):
         raise NotImplementedError
@@ -58,31 +59,52 @@ class ImageVideoBaseDataset(Dataset):
 
     def load_and_transform_media_data(self, index, data_path):
         if self.media_type == "image":
-            return self.load_and_transform_media_data_image(index, data_path, clip_transform=self.clip_transform)
+            return self.load_and_transform_media_data_image(
+                index, data_path, clip_transform=self.clip_transform
+            )
         else:
-            return self.load_and_transform_media_data_video(index, data_path, clip_transform=self.clip_transform)
+            return self.load_and_transform_media_data_video(
+                index, data_path, clip_transform=self.clip_transform
+            )
 
-    def load_and_transform_media_data_image(self, index, data_path, clip_transform=False):
+    def load_and_transform_media_data_image(
+        self, index, data_path, clip_transform=False
+    ):
         image = load_image_from_path(data_path, client=self.client)
         if not clip_transform:
             image = self.transform(image)
         return image, index
 
-    def load_and_transform_media_data_video(self, index, data_path, return_fps=False, clip=None, clip_transform=False):
+    def load_and_transform_media_data_video(
+        self, index, data_path, return_fps=False, clip=None, clip_transform=False
+    ):
         for _ in range(self.num_tries):
             try:
-                max_num_frames = self.max_num_frames if hasattr(self, "max_num_frames") else -1
+                max_num_frames = (
+                    self.max_num_frames if hasattr(self, "max_num_frames") else -1
+                )
                 if "webvid" in data_path:
-                    hdfs_dir="hdfs://harunava/home/byte_ailab_us_cvg/user/weimin.wang/videogen_data/webvid_data/10M_full_train"
+                    hdfs_dir = "hdfs://harunava/home/byte_ailab_us_cvg/user/weimin.wang/videogen_data/webvid_data/10M_full_train"
                     video_name = os.path.basename(data_path)
                     video_id, extension = os.path.splitext(video_name)
                     ind_file = os.path.join(hdfs_dir, self.keys_indexfile[video_id])
-                    frames, frame_indices, fps = self.video_reader(ind_file, video_id, self.num_frames, self.sample_type, 
-                                               max_num_frames=max_num_frames, client=self.client, clip=clip)
+                    frames, frame_indices, fps = self.video_reader(
+                        ind_file,
+                        video_id,
+                        self.num_frames,
+                        self.sample_type,
+                        max_num_frames=max_num_frames,
+                        client=self.client,
+                        clip=clip,
+                    )
                 else:
                     frames, frame_indices, fps = self.video_reader(
-                        data_path, self.num_frames, self.sample_type, 
-                        max_num_frames=max_num_frames, client=self.client, clip=clip
+                        data_path,
+                        self.num_frames,
+                        self.sample_type,
+                        max_num_frames=max_num_frames,
+                        client=self.client,
+                        clip=clip,
                     )
             except Exception as e:
                 logger.warning(

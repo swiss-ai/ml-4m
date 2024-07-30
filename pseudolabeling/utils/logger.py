@@ -32,7 +32,7 @@ def setup_wandb(config):
         project=config.wandb.project,
         entity=config.wandb.entity,
         name=os.path.basename(config.output_dir),
-        reinit=True
+        reinit=True,
     )
     return run
 

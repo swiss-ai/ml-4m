@@ -64,7 +64,7 @@ class SaveVQDataset(Dataset):
         corrupt_samples_log: Optional[str] = None,
         dryrun: bool = False,
         force_new_crop: bool = False,
-        every_nth_frame: int = 1,
+        target_fps: int = 1,
     ):
         super().__init__()
 
@@ -82,7 +82,7 @@ class SaveVQDataset(Dataset):
         self.mask_value = mask_value
         self.task_transforms = task_transforms
         self.resample_mode = resample_mode
-        self.every_nth_frame = every_nth_frame
+        self.target_fps = target_fps
 
         self.force_new_crop = force_new_crop
 
@@ -127,30 +127,33 @@ class SaveVQDataset(Dataset):
             temp_file_name = temp_file.name
 
         cap = cv2.VideoCapture(temp_file_name)
-        # print(cap.get(5))  # gets fps if needed
+        fps = cap.get(5)
         if not cap.isOpened():
             os.remove(temp_file_name)
             raise ValueError("Failed to open video stream from bytes")
+
+        # Frame selection based on desired FPS
+        frame_interval = max(1, round(fps / self.target_fps))  # Calculate interval
 
         frame_count = 0
 
         try:
             while True:
-                if frame_count % self.every_nth_frame == 0:
+                # Check if frame should be extracted
+                if frame_count % frame_interval == 0:
                     ret, frame = cap.read()
                     if not ret:
-                        break
+                        break  # End of video
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     frame = Image.fromarray(frame)
                     yield frame
                 else:
-                    ret = cap.grab()
-                    if not ret:
-                        break
+                    # Skip frames to achieve the desired FPS
+                    cap.grab()  # Move to the next frame without decoding
                 frame_count += 1
         finally:
             cap.release()
-            os.remove(temp_file_name)
+            os.remove(temp_file_name) 
 
     def __len__(self):
         return len(self.samples)
@@ -172,7 +175,7 @@ class SaveVQDataset(Dataset):
         """
         # FIXME: remove
         print(index)
-        
+
         rank = torch.distributed.get_rank()
 
         path, _ = self.samples[index]
@@ -308,7 +311,7 @@ def main(args):
         resample_mode=args.resample_mode,
         corrupt_samples_log=args.corrupt_samples_log,
         force_new_crop=args.force_new_crop,
-        every_nth_frame=args.every_nth_frame,
+        targetfps=args.target_fps,
     )
     print("loaded dataset!")
 
@@ -325,13 +328,12 @@ def main(args):
         collate_fn=video_collate_fn,
     )
 
-     
     model.to(device)
     if feature_extractor is not None:
         feature_extractor.to(device)
 
     time.sleep(1)
-    
+
     print("Starting tokenization")
     start_time = time.time()
 
@@ -568,10 +570,10 @@ if __name__ == "__main__":
         help="Create new crops, otherwise try to load.",
     )
     parser.add_argument(
-        "--every_nth_frame",
+        "--target_fps",
         default=10,
         type=int,
-        help="Only tokenize every nth frame of the video.",
+        help="Only tokenize every X fps per video, sampled uniformly.",
     )
 
     args = parser.parse_args()
