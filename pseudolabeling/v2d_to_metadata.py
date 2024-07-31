@@ -21,14 +21,10 @@ METADATA_MAPPING = {
 
 def process_tar_files(source_directory, target_directory, dataset, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
-    # TODO: this path
-    # source_directory = os.path.join(source_directory, "video_rgb")
-    target_directory = os.path.join(target_directory, "video_metadata")
 
     os.makedirs(target_directory, exist_ok=True)
 
     for tar_path in os.listdir(source_directory):
-        print(source_directory)
         if tar_path.endswith(".tar"):
             shard_name = "shard-" + os.path.splitext(tar_path)[0] + ".tar"
             target_tar_path = os.path.join(target_directory, shard_name)
@@ -73,15 +69,20 @@ def process_json_file(json_file_path, output_dir, dataset):
 
         if data["status"] != "success":
             # errored while downloading
+            print(data["status"])
             return
         elif "subtitles" not in data["yt_meta_dict"]:
-            print(data)
-            # XXX: always ensure to only write metadata where we have everything we need
-            # (transcript, video, ...)
+            print("NO SUBTITLES: ", data)
+            # indeed, there are some videos without subtitles (np speech)
             return
-        if data["yt_meta_dict"]["subtitles"].keys() != {"en"}:
-            # XXX: for now, we decided to only exclude non-English videos
-            return
+        if (
+            data["yt_meta_dict"]["subtitles"].keys() != {"en"}
+            and len(data["yt_meta_dict"]["subtitles"].keys()) > 0
+        ):
+            # XXX: for now, we decided to only exclude non-English videos.
+            raise ValueError(
+                f"Non-English subtitles found: {data['yt_meta_dict']['subtitles'].keys()}"
+            )
         for key, value in METADATA_MAPPING.items():
             if value in data["yt_meta_dict"]["info"]:
                 json_content[key] = data["yt_meta_dict"]["info"][value]
@@ -93,18 +94,12 @@ def process_json_file(json_file_path, output_dir, dataset):
 
 
 def main(args):
-    for folder in os.listdir(args.data_root):
-        if folder in ["train", "val", "test"]:
-            print(f"Processing {folder}.")
-            process_tar_files(
-                source_directory=os.path.join(
-                    args.data_root,
-                    folder,
-                ),
-                target_directory=os.path.join(args.data_root, folder),
-                dataset=args.dataset,
-                skip_existing=args.skip_existing,
-            )
+    process_tar_files(
+        source_directory=args.data_root,
+        target_directory=os.path.join(args.data_root, "..", "video_metadata"),
+        dataset=args.dataset,
+        skip_existing=args.skip_existing,
+    )
 
 
 if __name__ == "__main__":
@@ -115,9 +110,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_root",
         type=str,
-        # FIXME: default dir
-        # default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
-        default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
+        default="/store/swissai/a08/data/4m/video_rgb",
+        # default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
         help="Dir containing the JSON files to process.",
     )
     parser.add_argument(

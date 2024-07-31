@@ -11,4 +11,8 @@ wandb/
 tokenizer_ckpts/
 *pkl
 *.egg-info
+<<<<<<< HEAD
 *.log
+=======
+build/**
+>>>>>>> da82c44 (adapt paths + langs)
