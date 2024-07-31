@@ -379,14 +379,12 @@ def main(args):
         all_captions = []
         print(conv)
 
-        # TODO: change; batch should be shards x videos x clips
-        # TODO: batch-ify
+        # TODO: batch-ify (but super cumbersome, PLLaVA does not provide this natively)
         for shard in videos_batch:
             shard_caption = []
             for video in shard:
                 video_caption = []
                 for clip in video:
-                    pdb.set_trace()
                     llm_response, _ = pllava_answer(
                         conv=conv,
                         model=model,
@@ -396,9 +394,6 @@ def main(args):
                         max_new_tokens=256,
                         print_res=True,
                     )
-                    # TODO: figure out conv stuff
-                    print(llm_response)
-                    print(conv)
                     conv = conv_templates[args.conv_mode].copy()
                     conv.user_query(query_action_base, None, None, is_mm=True)
                     video_caption.append(llm_response)
@@ -406,29 +401,27 @@ def main(args):
             all_captions.append(shard_caption)
             # TODO: "In the image" --> too short scenes?
             # TODO: add len of clip/num_clip_frames to prompt?
-
-        pdb.set_trace()
+                  
         print(f"Tokenized video shards.")
 
         print("Saving tokenized video shards to disk.")
-        # TODO: save, to jsonl? How? Add other info like clips
+        # TODO: save, to jsonl? How? Add other info like clips?
         for shard_captions, tar_path in zip(all_captions, tar_paths):
-            with tarfile.open(tokens_path, "w") as tar:
-                for i, video_tokens in enumerate(shard_captions):
+            with tarfile.open(tar_path, "w") as tar:
+                for i, video_captions in enumerate(shard_captions):
                     # TODO: prefix with shard-... or not?
                     # TODO: if we save like this here, does this even retain intra-tar order?
-                    save_name = f"{i:05d}.jsonl"
+                    save_name = f"{i:05d}.json"
                     if args.dryrun:
                         print(
-                            f"Dryrun: rank {global_rank} -> {video_tokens}/{save_name}"
+                            f"Dryrun: rank {global_rank} -> {video_captions}/{save_name}"
                         )
                     else:
-                        with BytesIO() as bio:
-                            np.save(bio, video_tokens)
-                            bio.seek(0)
-                            tarinfo = tarfile.TarInfo(save_name)
-                            tarinfo.size = len(bio.getvalue())
-                            tar.addfile(tarinfo, bio)
+                        # save to json
+                        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+                            f.write(json.dumps(video_captions))
+                        tar.add(f.name, save_name)
+                        os.remove(f.name)
 
         if pbar is not None:
             pbar.update(1)
