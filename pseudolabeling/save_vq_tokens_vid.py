@@ -87,7 +87,6 @@ class SaveVQDataset(Dataset):
 
         self.dryrun = dryrun
 
-        # XXX: not sure how 4m originally did this; may be unnecessary
         self.classes = ['video_rgb']
         self.class_to_idx = {'video_rgb': 0}
 
