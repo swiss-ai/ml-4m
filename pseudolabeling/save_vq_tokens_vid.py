@@ -20,6 +20,7 @@ import tempfile
 import time
 from io import BytesIO
 from typing import Optional
+import pdb
 
 import cv2
 import numpy as np
@@ -69,9 +70,7 @@ class SaveVQDataset(Dataset):
         super().__init__()
 
         self.data_root = root
-        self.tokens_root = os.path.join(
-            root, tokens_dir
-        )  # XXX: in general, paths are a bit hacky now. Clean up later.
+        self.tokens_root = os.path.join(root, tokens_dir)
         self.crop_settings_root = os.path.join(
             os.path.abspath(__file__ + "/../"), crop_settings_dir
         )
@@ -89,7 +88,8 @@ class SaveVQDataset(Dataset):
         self.dryrun = dryrun
 
         # XXX: not sure how 4m originally did this; may be unnecessary
-        self.classes, self.class_to_idx = find_classes(root)
+        self.classes = ['video_rgb']
+        self.class_to_idx = {'video_rgb': 0}
 
         self.samples = make_dataset(
             root, self.class_to_idx, ("tar",), None, allow_empty=True
@@ -153,7 +153,7 @@ class SaveVQDataset(Dataset):
                 frame_count += 1
         finally:
             cap.release()
-            os.remove(temp_file_name) 
+            os.remove(temp_file_name)
 
     def __len__(self):
         return len(self.samples)
@@ -173,10 +173,8 @@ class SaveVQDataset(Dataset):
                 (n_frames, n_crops, c, h, w), where c=3, h=w=224 (=input_size; due to tokenizer)
             str: Path to the current shard of videos (tokenized/output).
         """
-        # FIXME: remove
-        print(index)
-
         rank = torch.distributed.get_rank()
+        print(index, rank)
 
         path, _ = self.samples[index]
         videos = self.loader(path, VIDEO_EXTENSIONS)
@@ -190,7 +188,6 @@ class SaveVQDataset(Dataset):
             raise NotImplementedError
 
         tokens_path = os.path.join(self.tokens_root, f"{file_id}.tar")
-        print(tokens_path)
         if not self.dryrun:
             os.makedirs(os.path.dirname(tokens_path), exist_ok=True)
 
@@ -287,7 +284,7 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    print("loading model")
+    print("Loading model")
     model = DiVAE.from_pretrained(args.hf_model_id)
 
     feature_extractor = get_feature_extractor(args)
@@ -298,9 +295,9 @@ def main(args):
     sampler_rank = global_rank
 
     loader_task = "rgb" if args.task in FEATURE_TASKS else args.task
-    print("start loading ds")
+    print("Start loading ds")
     dataset = SaveVQDataset(
-        root=os.path.join(args.data_root, args.split),
+        root=args.data_root,
         crop_settings_dir="crop_settings",
         tokens_dir=args.tokens_dir,
         task=loader_task,
@@ -311,11 +308,10 @@ def main(args):
         resample_mode=args.resample_mode,
         corrupt_samples_log=args.corrupt_samples_log,
         force_new_crop=args.force_new_crop,
-        targetfps=args.target_fps,
+        target_fps=args.target_fps,
     )
-    print("loaded dataset!")
+    print("Loaded dataset!")
 
-    print(num_tasks, sampler_rank)
     sampler = torch.utils.data.DistributedSampler(
         dataset, num_replicas=num_tasks, rank=sampler_rank, shuffle=False
     )
@@ -375,9 +371,16 @@ def main(args):
             for shard in videos_batch:
                 for video in shard:
                     video_batch.extend(video)
+            if len(video_batch) == 0:
+                print("No videos in batch.")
+                continue
             videos_batch_merged = torch.stack(video_batch)
         # merge batch and augmentation dimensions
         # thus, dim 0 contains: all frames from all videos from all shards in the batch
+        # safety measure if videos_batch_merged is empty
+        if len(videos_batch_merged) == 0:
+            print("No frames in batch.")
+            continue
         videos_batch_merged = rearrange(videos_batch_merged, "b n c h w -> (b n) c h w")
         # For efficiency, process images with batch size that might be different from loader batch size or num augmentations
         sub_batches = videos_batch_merged.split(args.batch_size, dim=0)
@@ -459,7 +462,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog="VQ token saver")
+    parser = argparse.ArgumentParser(prog="VQ Video token saver")
 
     parser.add_argument(
         "--hf_model_id",
@@ -470,14 +473,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_root",
         type=str,
-        default="/store/swissai/a08/data/4m-data",
+        default="/store/swissai/a08/data/4m",
         help="Path to video_rgb dataset root",
     )
-    parser.add_argument("--split", type=str, default="train", help="train or val")
     parser.add_argument(
         "--n_crops",
         type=int,
-        default="1",
+        default="3",
         help="Number of crops to save. If 1, only a center crop will be saved. \
              If > 1, first image will be center cropped, the subsequent ones will be randomly cropped.",
     )
@@ -533,7 +535,7 @@ if __name__ == "__main__":
         default="video_rgb_tok",
         help="Suffix to add to the folder under which the tokens are saved.",
     )
-    parser.add_argument("--num_workers", default=6, type=int)
+    parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument(
         "--pin_mem",
         default=False,
@@ -549,7 +551,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--batch_size",
-        default=64,
+        default=512,
         type=int,
         help="Batch size per GPU (default: %(default)s) (how many frames to tokenize at once)",
     )
@@ -571,7 +573,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--target_fps",
-        default=10,
+        default=5,
         type=int,
         help="Only tokenize every X fps per video, sampled uniformly.",
     )
