@@ -217,47 +217,6 @@ class ImageTransform(AbstractTransform):
         return img
 
 
-class VideoRGBTransform(AbstractTransform):
-    """
-    A video transform applied to a sequence of RGB images.
-    For now, I'm assuming the input to the load function points to a webdataset containing mp4 which contains the frames in the specified modality (e.g, RGB).
-    This format almost certainly is subject to change. TODO: figure out what the right format for this input should be (aka, how are we storing the raw videos?)
-
-    Output: a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB). OR should this already be unrolled into something like (num_frames * C, H, W)?
-    """
-
-    # raise NotImplementedError("I'm not ")
-    def load(self, path):
-        raise NotImplementedError(
-            "TODO: implement the loader for video frames, probably from a webdataset. It might be helpful to see how to load data from video2dataset format into a dataloader here: https://github.com/swiss-ai/ml-4m/blob/kdu/pseudolabeler/notebooks/pseudolabeler.py. However we don't want to load it into a dataset so maybe that's overkill? Instead might be helpful to just load directly using webd utilities."
-        )
-
-    def preprocess(self, sample):
-        raise NotImplementedError(
-            "TODO: what preprocessing do we want? do we also want to convert to RGB and do color jitter like with normal RGBTransform?"
-        )
-
-    def image_augment(
-        self,
-        v,
-        crop_coords: Tuple,
-        flip: bool,
-        orig_size: Tuple,
-        target_size: Tuple,
-        rand_aug_idx: Optional[int],
-        resample_mode: str = None,
-    ):
-        raise NotImplementedError(
-            "TODO: what augmentations do we want? do we also want to same as with normal image RGBTransform?"
-        )
-
-    def postprocess(self, v):
-        # TODO: deicde
-        raise NotImplementedError(
-            "TODO: postprocess should convert the frames into a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB)."
-        )
-
-
 class RGBTransform(
     ImageTransform
 ):  # For RGB in raw format for 4M because it's passed in directly (and also training tokenizer)
@@ -325,6 +284,47 @@ class RGBTransform(
     def postprocess(self, sample):
         sample = self.rgb_to_tensor(sample)
         return sample
+
+
+class VideoRGBTransform(RGBTransform):
+    """
+    A video transform applied to a sequence of RGB images.
+    For now, I'm assuming the input to the load function points to a webdataset containing mp4 which contains the frames in the specified modality (e.g, RGB).
+    This format almost certainly is subject to change. TODO: figure out what the right format for this input should be (aka, how are we storing the raw videos?)
+
+    Output: a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB). OR should this already be unrolled into something like (num_frames * C, H, W)?
+    """
+
+    # raise NotImplementedError("I'm not ")
+    def load(self, path):
+        raise NotImplementedError(
+            "TODO: implement the loader for video frames, probably from a webdataset. It might be helpful to see how to load data from video2dataset format into a dataloader here: https://github.com/swiss-ai/ml-4m/blob/kdu/pseudolabeler/notebooks/pseudolabeler.py. However we don't want to load it into a dataset so maybe that's overkill? Instead might be helpful to just load directly using webd utilities."
+        )
+
+    def preprocess(self, sample):
+        raise NotImplementedError(
+            "TODO: what preprocessing do we want? do we also want to convert to RGB and do color jitter like with normal RGBTransform?"
+        )
+
+    def image_augment(
+        self,
+        v,
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx: Optional[int],
+        resample_mode: str = None,
+    ):
+        raise NotImplementedError(
+            "TODO: what augmentations do we want? do we also want to same as with normal image RGBTransform?"
+        )
+
+    def postprocess(self, v):
+        # TODO: deicde
+        raise NotImplementedError(
+            "TODO: postprocess should convert the frames into a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB)."
+        )
 
 
 class DepthTransform(ImageTransform):
