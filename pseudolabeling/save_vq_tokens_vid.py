@@ -87,8 +87,8 @@ class SaveVQDataset(Dataset):
 
         self.dryrun = dryrun
 
-        self.classes = ['video_rgb']
-        self.class_to_idx = {'video_rgb': 0}
+        self.classes = ["train"]  # FIXME. "video_rgb"
+        self.class_to_idx = {"train": 0}
 
         self.samples = make_dataset(
             root, self.class_to_idx, ("tar",), None, allow_empty=True
@@ -172,8 +172,6 @@ class SaveVQDataset(Dataset):
                 (n_frames, n_crops, c, h, w), where c=3, h=w=224 (=input_size; due to tokenizer)
             str: Path to the current shard of videos (tokenized/output).
         """
-        rank = torch.distributed.get_rank()
-        print(index, rank)
 
         path, _ = self.samples[index]
         videos = self.loader(path, VIDEO_EXTENSIONS)
@@ -472,7 +470,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_root",
         type=str,
-        default="/store/swissai/a08/data/4m",
+        default="/store/swissai/a08/data/4m/splits/video_rgb/",  # FIXME
         help="Path to video_rgb dataset root",
     )
     parser.add_argument(

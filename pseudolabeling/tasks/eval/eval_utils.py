@@ -15,13 +15,13 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
 from torchvision.transforms.functional import InterpolationMode
-from moviepy.editor import VideoFileClip
+# from moviepy.editor import VideoFileClip
 
 
-from decord import (
-    VideoReader,
-    cpu,
-)  # This is Terrible, if you have this line of import in front of torch, will cause model.to(device) to hang
+# from decord import (
+#     VideoReader,
+#     cpu,
+# )  # This is Terrible, if you have this line of import in front of torch, will cause model.to(device) to hang
 from transformers import StoppingCriteria, StoppingCriteriaList
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 

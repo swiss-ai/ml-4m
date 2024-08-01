@@ -33,7 +33,6 @@ from torch.utils.data import Dataset
 from torchvision.datasets.folder import find_classes, make_dataset
 from torchvision.transforms import Resize
 from tqdm import tqdm
-from decord import VideoReader, cpu
 
 import fourm.utils as utils
 import fourm.utils.clip as clip
@@ -48,7 +47,7 @@ from tasks.eval.eval_utils import conv_templates
 FEATURE_TASKS = ["CLIP-B16"]
 VIDEO_EXTENSIONS = (".mp4",)
 
-query_action_base = (
+QUERY_ACTION_BASE = (
     "You are to assist me in accomplishing a task about the input video."
     "# Task\n"
     "Describe the main characters and actions in the provided video, without mentioning the background.\n"
@@ -86,6 +85,7 @@ class SaveVQDataset(Dataset):
         root: str,
         metadata_dir: str,
         video_rgb_dir: str,
+        captions_dir: str,
         task: str,
         input_size: int = 336,
         task_transforms: dict = MODALITY_TRANSFORMS_DIVAE,
@@ -100,10 +100,7 @@ class SaveVQDataset(Dataset):
         self.metadata_root = os.path.join(
             root, metadata_dir
         )  # XXX: in general, paths are a bit hacky now. Clean up later.
-        self.caption_root = os.path.join(
-            root,
-            "video_caption",  # FIXME: configurable
-        )
+        self.caption_root = os.path.join(root, captions_dir)
         print(f"Using:\nData: {self.data_root}")
         self.input_size = input_size
         self.task = task
@@ -113,16 +110,17 @@ class SaveVQDataset(Dataset):
 
         self.dryrun = dryrun
 
-        # XXX: not sure how 4m originally did this; may be unnecessary
-        # pdb.set_trace()
-        self.classes, self.class_to_idx = find_classes(root)
+        # FIXME
+        self.classes = ["train"]
+        self.class_to_idx = {"train": 0}
 
         self.all_samples = make_dataset(
             root, self.class_to_idx, ("tar",), None, allow_empty=True
         )
         # find samples with video_rgb_dir in them
-        video_rgb_idx = self.class_to_idx[video_rgb_dir]
-        metadata_idx = self.class_to_idx[metadata_dir]
+        # video_rgb_idx = self.class_to_idx[video_rgb_dir]
+        video_rgb_idx = 0
+        # metadata_idx = self.class_to_idx[metadata_dir]
         self.samples = []
         # ensure both idcs have the same tarfiles
         # for sample in self.all_samples:
@@ -183,12 +181,23 @@ class SaveVQDataset(Dataset):
                     with tar.extractfile(member) as file_obj:
                         yield BytesIO(file_obj.read()), json_dict
 
-    def load_video(self, video, cuts):
+    def load_video(self, video_bytes, cuts):
         # TODO: check resolution
         transforms = Resize(size=self.input_size)
 
-        vr = VideoReader(video, ctx=cpu(0), num_threads=1)
-        num_frames = len(vr)
+        # TODO: wok around decord?!
+        video_bytes.seek(0)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+            temp_file.write(video_bytes.read())
+            temp_file_name = temp_file.name
+
+        cap = cv2.VideoCapture(temp_file_name)
+        if not cap.isOpened():
+            os.remove(temp_file_name)
+            raise ValueError("Failed to open video stream from bytes")
+
+        num_frames = cuts[-1][1]
         print(num_frames)
         # cuts is a list of lists, each containing 2 ints: start/end of video.
         clips = []
@@ -197,9 +206,14 @@ class SaveVQDataset(Dataset):
             clip_indices = get_index(cut[1] - cut[0], self.n_total_frames) + cut[0]
             images_group = []
             for cli_idx in clip_indices:
-                img = Image.fromarray(vr[cli_idx].asnumpy())
-                images_group.append(transforms(img))
+                # TODO: get rid of h264 error, but have to iterate over frames...
+                cap.set(cv2.CAP_PROP_POS_FRAMES, cli_idx)
+                ret, frame = cap.read()
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame = Image.fromarray(frame)
+                images_group.append(transforms(frame))
             clips.append(images_group)
+        cap.release()
         return clips
 
     def __len__(self):
@@ -220,12 +234,9 @@ class SaveVQDataset(Dataset):
                 (n_frames, n_crops, c, h, w), where c=3, h=w=224 (=input_size; due to tokenizer)
             str: Path to the current shard of videos (tokenized/output).
         """
-        # FIXME: remove
-        print(index)
-
-        # rank = torch.distributed.get_rank()
 
         paths = self.samples[index]
+        # TODO: clean up this
         shard, metadata_dir, video_rgb_dir = (
             paths["shard"],
             paths["metadata_dir"],
@@ -246,18 +257,12 @@ class SaveVQDataset(Dataset):
 
         all_video_frames = []
         # Perform augmentations and optionally mask images
-        v_idx = 0
         for video, cut_json in videos:
             if cut_json["status"] != "success":
                 print("FAIL: ", cut_json)
                 continue
-            # FIXME: Remove
-            v_idx += 1
-            if v_idx > 2:
-                break
             cuts = cut_json["cuts"]["cuts_original_fps"]
-            print(cuts)
-            full_video = self.load_video(video=video, cuts=cuts)
+            full_video = self.load_video(video_bytes=video, cuts=cuts)
             all_video_frames.append(full_video)
 
         return all_video_frames, caption_path
@@ -284,8 +289,7 @@ def load_model_and_dataset(
         lora_alpha=lora_alpha,
         weight_dir=weight_dir,
     )
-    print("done loading llava")
-    #  position embedding
+    print("Done loading pllava!")
     model = model.eval()
     return model, processor
 
@@ -299,8 +303,7 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    print("loading model")
-    # FIXME
+    print("Loading model")
     model, processor = load_model_and_dataset(
         pretrained_model_name_or_path=args.pllava_dir,
         num_frames=args.n_total_frames,
@@ -310,7 +313,7 @@ def main(args):
     )
 
     conv = conv_templates[args.conv_mode].copy()
-    conv.user_query(query_action_base, None, None, is_mm=True)
+    conv.user_query(QUERY_ACTION_BASE, None, None, is_mm=True)
 
     # TODO: model prompt - default, configurable, test
 
@@ -321,9 +324,10 @@ def main(args):
 
     print("start loading ds")
     dataset = SaveVQDataset(
-        root=os.path.join(args.data_root, args.split),
+        root=args.data_root,
         metadata_dir=args.metadata_dir,
         video_rgb_dir=args.video_rgb_dir,
+        captions_dir=args.caption_dir,
         task="caption",  # TODO: check
         input_size=args.input_size,  # TODO: check default, 336 fine?
         resample_mode=args.resample_mode,
@@ -333,14 +337,14 @@ def main(args):
     print("loaded dataset!")
 
     print(num_tasks, sampler_rank)
-    # sampler = torch.utils.data.DistributedSampler(
-    #     dataset, num_replicas=num_tasks, rank=sampler_rank, shuffle=False
-    # )
+    sampler = torch.utils.data.DistributedSampler(
+        dataset, num_replicas=num_tasks, rank=sampler_rank, shuffle=False
+    )
     data_loader = torch.utils.data.DataLoader(
         dataset,
-        # sampler=sampler,
+        sampler=sampler,
         batch_size=args.batch_size_dataloader,
-        num_workers=0,  # FIXME
+        num_workers=args.num_workers,
         drop_last=False,
         collate_fn=video_collate_fn,
     )
@@ -377,12 +381,11 @@ def main(args):
         print("Processing video shards: ", tar_paths)
 
         all_captions = []
-        print(conv)
 
         # TODO: batch-ify (but super cumbersome, PLLaVA does not provide this natively)
         for shard in videos_batch:
             shard_caption = []
-            for video in shard:
+            for video in tqdm(shard):
                 video_caption = []
                 for clip in video:
                     llm_response, _ = pllava_answer(
@@ -392,7 +395,7 @@ def main(args):
                         do_sample=False,
                         img_list=clip,
                         max_new_tokens=256,
-                        print_res=True,
+                        print_res=args.show_res,
                     )
                     conv = conv_templates[args.conv_mode].copy()
                     conv.user_query(query_action_base, None, None, is_mm=True)
@@ -401,7 +404,7 @@ def main(args):
             all_captions.append(shard_caption)
             # TODO: "In the image" --> too short scenes?
             # TODO: add len of clip/num_clip_frames to prompt?
-                  
+
         print(f"Tokenized video shards.")
 
         print("Saving tokenized video shards to disk.")
@@ -430,7 +433,7 @@ def main(args):
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print("Tokenization time {}".format(total_time_str))
+    print("Caption time {}".format(total_time_str))
 
 
 if __name__ == "__main__":
@@ -439,13 +442,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pllava_dir",
         type=str,
-        default="/cluster/work/cotterell/mfrohmann/PLLaVA/MODELS/pllava-7b",
+        default="/store/swissai/a08/models/pllava-7b",
         help="Dir to PLLaVa model. Must be alreaded downloadd via python_scripts/hf.py (PLLaVa repo).",
     )
     parser.add_argument(
         "--data_root",
         type=str,
-        default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
+        default="/store/swissai/a08/data/4m/splits/video_rgb/",  # FIXME
         help="Path to dataset root",
     )
     # FIXME: replace (temporarily) with whisperX
@@ -461,7 +464,6 @@ if __name__ == "__main__":
         default="video_rgb",
         help="Relative path from data_root. From data_root/train.",
     )
-    parser.add_argument("--split", type=str, default="train", help="train or val")
     parser.add_argument("--input_size", type=int, default=336, help="Image size")
     parser.add_argument("--task", type=str, default="caption", help="Task name")
     parser.add_argument(
@@ -501,7 +503,7 @@ if __name__ == "__main__":
         default="video_caption",
         help="Suffix to add to the folder under which the tokens are saved.",
     )
-    parser.add_argument("--num_workers", default=6, type=int)
+    parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument(
         "--pin_mem",
         default=False,
@@ -544,6 +546,13 @@ if __name__ == "__main__":
         type=str,
         required=False,
         default="plain",
+    )
+
+    parser.add_argument(
+        "--store_res",
+        action="store_true",
+        default=False,
+        help="Print LLM prompt + response for every clip or not.",
     )
 
     args = parser.parse_args()

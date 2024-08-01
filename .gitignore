@@ -18,3 +18,5 @@ tokenizer_ckpts/
 *.json
 *.jsonl
 *.safetensors
+build/**
+slurm_cache/**
