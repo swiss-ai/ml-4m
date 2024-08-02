@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ython run_training_4m.py --data_config cfgs/default/4m/data/video/mix_mod3_rgb_tok_to_all_a0.5.yaml
+# python run_training_4m.py --data_config cfgs/default/4m/data/video/mix_mod3_rgb_tok_to_all_a0.5.yaml
 import argparse
 import datetime
 import json
