@@ -21,7 +21,7 @@ train:
       # Data can either be local or on cloud storage (e.g. S3), see data docs for more info
       # Use braceexpand notation to indicate shard range (e.g. shard-{0000..9999}.tar)
       # Use brackets to indicate multiple modalities (e.g. [modality1,modality2,modality3]) 
-      data_path: '/store/swissai/a08/data/4m/splits2/train/[video_rgb,video_rgb_tok]/00000{00000..00100}.tar' # TODO: need to reformat the data correctly here. 
+      data_path: '/store/swissai/a08/data/4m/cleaned/train/[video_rgb,video_tok_rgb]/0000000000.tar' # TODO: need to reformat the data correctly here. 
       use_wds: True # Use webdataset
       wds_n_repeats: 4 # Number of repeats for webdataset loader to improve efficiency
       wds_shuffle_buffer_tar: 1_000 # Webdatasets shuffle buffer after loading tar files
@@ -41,4 +41,4 @@ train:
 # val:
 #   datasets:
 #     my_video_dataset: 
-#       data_path: '/store/swissai/a08/data/4m/val/[video_rgb,video_rgb_tok]/00000{00175..00199}.tar'
+#       data_path: '/store/swissai/a08/data/4m/val/[video_rgb,video_tok_rgb]/00000{00175..00199}.tar'

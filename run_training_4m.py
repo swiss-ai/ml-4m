@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# python run_training_4m.py --data_config cfgs/default/4m/data/video/mix_mod3_rgb_tok_to_all_a0.5.yaml
-import argparse
+# FOR DEBUGGING with pdb:
+# 1. make sure the wds.WebLoader(num_workers=0) in a) build_wds_fm_pretraining_dataloader and b) build_mixture_dataloader
+# python -m torch.distributed.launch --nproc_per_node 1 --use-env run_training_4m.py --config /store/swissai/a08/kdu/ml-4m/cfgs/default/4m/models/video/4m-b_mod3.yamlimport argparse
 import datetime
 import json
 import math
