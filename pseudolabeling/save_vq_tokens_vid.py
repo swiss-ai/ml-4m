@@ -202,6 +202,7 @@ class SaveVQDataset(Dataset):
 
             # Create or load crop settings
             if os.path.exists(crop_settings_path) and not self.force_new_crop:
+                # XXX: ensure that n_crops is consistent with other modalities and provided crop_settings
                 try:
                     settings = np.load(crop_settings_path)
                 except:

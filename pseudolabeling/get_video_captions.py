@@ -205,15 +205,27 @@ class SaveVQDataset(Dataset):
             # sample self.n_total_frames frames uniformly from the cut
             clip_indices = get_index(cut[1] - cut[0], self.n_total_frames) + cut[0]
             images_group = []
-            for cli_idx in clip_indices:
-                # TODO: get rid of h264 error, but have to iterate over frames...
-                cap.set(cv2.CAP_PROP_POS_FRAMES, cli_idx)
-                ret, frame = cap.read()
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame = Image.fromarray(frame)
-                images_group.append(transforms(frame))
+                
+            frame_count = 0
+            
+            while True:
+                # Check if frame should be extracted
+                if frame_count in clip_indices:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break  # End of video
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = Image.fromarray(frame)
+                    frame = transforms(frame)
+                    images_group.append(frame)
+                else:
+                    # Skip frames to achieve the desired FPS
+                    cap.grab()  # Move to the next frame without decoding
+                frame_count += 1
+                
             clips.append(images_group)
         cap.release()
+        os.remove(temp_file_name)
         return clips
 
     def __len__(self):
@@ -398,7 +410,7 @@ def main(args):
                         print_res=args.show_res,
                     )
                     conv = conv_templates[args.conv_mode].copy()
-                    conv.user_query(query_action_base, None, None, is_mm=True)
+                    conv.user_query(QUERY_ACTION_BASE, None, None, is_mm=True)
                     video_caption.append(llm_response)
                 shard_caption.append(video_caption)
             all_captions.append(shard_caption)
@@ -549,7 +561,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--store_res",
+        "--show_res",
         action="store_true",
         default=False,
         help="Print LLM prompt + response for every clip or not.",

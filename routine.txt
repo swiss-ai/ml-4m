@@ -1,9 +1,0 @@
-# 1. V2D: Download + WhisperX transcripts: See /store/swissai/a08/containers/v2d/Dockerfile
-# 2. Metadata: 
-    # 2.1 Switch to 4m container: srun --overlap --jobid <JOBID> --environment=/store/swissai/a08/containers/4m/4m.toml --container-workdir=$PWD --pty bash
-    # 2.2 python pseudolabeling/v2d_to_metadata.py --dataset howto100m 
-        (potentially adapt --source_dir, depending on step 1.)
-    # 2.3 Process transcripts: BLOCKED BY WHISPERX/V2D INSTALL.
-    # 2.4 Tokenization: OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 pseudolabeling/save_vq_tokens_vid.py
-        # adapt --num_workers and --batch_size to needs.
-    # 2.5 Captioning: OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 pseudolabeling/get_video_captions.py
