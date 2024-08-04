@@ -110,7 +110,7 @@ def main():
     output_dir = (
         args.output_dir
         if args.output_dir is not None
-        else os.path.join(args.input_dir.replace("filtered_raw", "4m-data"), "video_rgb")
+        else os.path.join(args.input_dir.replace("filtered_raw", "4m"), "video_rgb")
     )
 
     if not args.validate_only:
