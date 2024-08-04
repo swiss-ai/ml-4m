@@ -1,0 +1,4 @@
+watch -n 1 "date '+%Y-%m-%d %H:%M:%S' >> ram.txt && free -h | tee -a ram.txt
+
+OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 save_vq_tokens_vid.py --data_roo
+t=/store/swissai/a08/data/raw/howto100m/v2d_1000/ --every_nth_frame 1000 --num_workers 2 --world_size 4
