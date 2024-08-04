@@ -14,7 +14,7 @@ def filter_tar_files(input_dir: str, output_dir: str):
     E.g., given the path raw/howto100m containing:
 
     raw/howto100m
-    |    | - shard-00000.tar
+    |    | - 00000.tar
     |    |   | - 00000.mp4
     |    |   | - 00000.m4a
     |    |   | - 00000.json
@@ -43,7 +43,8 @@ def filter_tar_files(input_dir: str, output_dir: str):
     for filename in tqdm(os.listdir(input_dir)):
         if filename.endswith(".tar"):
             input_path = os.path.join(input_dir, filename)
-            output_path = os.path.join(output_dir, filename)
+            shard_name = "shard-" + os.path.splitext(filename)[0] + ".tar"
+            output_path = os.path.join(output_dir, shard_name)
 
             # Open the input tar file
             with tarfile.open(input_path, "r") as tar_in:

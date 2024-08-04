@@ -24,7 +24,7 @@ def filter_mp4_from_tars(input_dir, output_dir):
 
     we want to end up with output_dir
 
-    4m-data/howto100m/video_rgb
+    4m/howto100m/video_rgb
     |    | - shard-00000.tar
     |    |   | - 00000.mp4
     |    |   | - 00002.mp4
