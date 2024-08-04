@@ -4,6 +4,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+from tqdm import tqdm
 from datetime import timedelta
 
 # FIXME: may need adaptation
@@ -24,7 +25,7 @@ def process_tar_files(source_directory, target_directory, dataset, skip_existing
 
     os.makedirs(target_directory, exist_ok=True)
 
-    for tar_path in os.listdir(source_directory):
+    for tar_path in tqdm(os.listdir(source_directory)):
         if tar_path.endswith(".tar"):
             shard_name = "shard-" + os.path.splitext(tar_path)[0] + ".tar"
             target_tar_path = os.path.join(target_directory, shard_name)
@@ -94,9 +95,14 @@ def process_json_file(json_file_path, output_dir, dataset):
 
 
 def main(args):
+    output_dir = (
+        args.output_dir
+        if args.output_dir is not None
+        else os.path.join(args.input_dir.replace("filtered_raw", "4m"), "video_metadata")
+    )
     process_tar_files(
-        source_directory=args.data_root,
-        target_directory=os.path.join(args.data_root, "..", "video_metadata"),
+        source_directory=args.input_dir,
+        target_directory=output_dir,
         dataset=args.dataset,
         skip_existing=args.skip_existing,
     )
@@ -104,23 +110,33 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Process tarfiles containing JSONs and convert to structured JSONL format."
+        description="Process tarfiles from `filtered_raw` format containing JSONs and extract relevant metadata into the `video_metadata` modality."
     )
 
     parser.add_argument(
-        "--data_root",
+        "-I",
+        "--input_dir",
         type=str,
-        default="/store/swissai/a08/data/4m/video_rgb",
+        default="/store/swissai/a08/data/filtered_raw/howto100m/v2d_5000/",
         # default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
-        help="Dir containing the JSON files to process.",
+        help="A `filtered_raw` dir containing the JSON files to process.",
     )
     parser.add_argument(
+        "-O",
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output dir to save the pseudolabeled metadata.",
+    )
+    parser.add_argument(
+        "-S",
         "--skip_existing",
         default=False,  # FIXME
         help="Skip tarfiles already processed (exist in the target directory).",
     )
     # TODO: is this also in filestructure or do we have to provide it like this?
     parser.add_argument(
+        "-D",
         "--dataset",
         type=str,
         required=True,

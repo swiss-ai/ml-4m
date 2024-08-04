@@ -17,10 +17,6 @@ def timestamp_to_frames(timestamp, fps):
 
 def process_tar_files(source_directory, target_directory, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
-    # TODO: this path
-    # source_directory = os.path.join(source_directory, "video_rgb")
-    target_directory = os.path.join(target_directory, "video_transcript")
-
     os.makedirs(target_directory, exist_ok=True)
 
     for tar_path in os.listdir(source_directory):
@@ -107,37 +103,48 @@ def process_json_file(json_file_path, output_dir):
 
 
 def main(args):
-    for folder in os.listdir(args.data_root):
-        if folder in ["train", "val", "test"]:
-            current_folder = os.path.join(args.data_root, folder, args.whisper_dir)
-            print(f"Processing {current_folder}.")
-            process_tar_files(
-                source_directory=current_folder,
-                target_directory=os.path.join(args.data_root, folder),
-                skip_existing=args.skip_existing,
-            )
+    current_folder = os.path.join(args.input_dir, args.whisper_dir)
+    output_dir = (
+        args.output_dir
+        if args.output_dir is not None
+        else os.path.join(args.input_dir.replace("filtered_raw", "4m"), "video_transcript")
+    )
+    print(f"Processing {current_folder}.")
+    process_tar_files(
+        source_directory=current_folder,
+        target_directory=output_dir,
+        skip_existing=args.skip_existing,
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process tarfiles containing JSONs and convert to structured JSONL format."
     )
-
     parser.add_argument(
-        "--data_root",
+        "-I",
+        "--input_dir",
         type=str,
-        # FIXME: default dir
-        # default="/store/swissai/a08/data/4m-data/train/DEBUG/v2d_40k",
-        default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
-        help="Dir containing the JSON files to process.",
+        default="/store/swissai/a08/data/filtered_raw/howto100m/v2d_5000/",
+        # default="/cluster/work/cotterell/mm_swissai/raw/v2d_500/howto100m",
+        help="A `filtered_raw` dir containing the JSON files to process.",
     )
     parser.add_argument(
+        "-O",
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Output dir to save the pseudolabeled transcripts.",
+    )
+    parser.add_argument(
+        "-W",
         "--whisper_dir",
         type=str,
         default="whisperx",
         help="Dir containing the WhisperX transcripts.",
     )
     parser.add_argument(
+        "-S",
         "--skip_existing",
         default=False,  # FIXME
         help="Skip tarfiles already processed (exist in the target directory).",
