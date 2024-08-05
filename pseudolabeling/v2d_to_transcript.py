@@ -103,6 +103,9 @@ def process_json_file(json_file_path, output_dir):
 
 
 def main(args):
+    if "filtered_raw" not in args.input_dir:
+        raise ValueError(f"Expected input dir to be a subdir of `filtered_raw/`, instead received {args.input_dir}.")
+
     current_folder = os.path.join(args.input_dir, args.whisper_dir)
     output_dir = (
         args.output_dir
