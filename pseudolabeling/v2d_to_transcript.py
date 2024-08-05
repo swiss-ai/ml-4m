@@ -4,6 +4,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+from tqdm import tqdm
 from datetime import timedelta
 
 
@@ -19,17 +20,16 @@ def process_tar_files(source_directory, target_directory, skip_existing=True):
     """Extract, process, and re-package JSON files in TAR archives."""
     os.makedirs(target_directory, exist_ok=True)
 
-    for tar_path in os.listdir(source_directory):
-        if tar_path.endswith(".tar"):
-            shard_name = "shard-" + os.path.splitext(tar_path)[0] + ".tar"
-            target_tar_path = os.path.join(target_directory, shard_name)
+    for filename in tqdm(os.listdir(source_directory)):
+        if filename.endswith(".tar"):
+            target_tar_path = os.path.join(target_directory, filename)
             print(target_tar_path)
 
             if skip_existing and os.path.exists(target_tar_path):
                 print(f"Skipping already processed file: {target_tar_path}")
                 continue
 
-            source_tar_path = os.path.join(source_directory, tar_path)
+            source_tar_path = os.path.join(source_directory, filename)
             with tarfile.open(source_tar_path, "r") as tar:
                 temp_dir = tempfile.mkdtemp()
                 try:
