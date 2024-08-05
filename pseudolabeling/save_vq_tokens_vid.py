@@ -20,7 +20,6 @@ import tempfile
 import time
 from io import BytesIO
 from typing import Optional
-import pdb
 
 import cv2
 import numpy as np
@@ -28,11 +27,10 @@ import torch
 from einops import rearrange
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision.datasets.folder import find_classes, make_dataset
+from torchvision.datasets.folder import make_dataset
 from tqdm import tqdm
 
 import fourm.utils as utils
-import fourm.utils.clip as clip
 from fourm.data import CenterCropImageAugmenter, RandomCropImageAugmenter
 from fourm.data.modality_info import MODALITY_TRANSFORMS_DIVAE
 from fourm.vq.vqvae import DiVAE
@@ -53,6 +51,7 @@ class SaveVQDataset(Dataset):
     def __init__(
         self,
         root: str,
+        dataset_name: str,
         tokens_dir: str,
         crop_settings_dir: str,
         task: str,
@@ -62,7 +61,6 @@ class SaveVQDataset(Dataset):
         mask_value: Optional[float] = None,
         task_transforms: dict = MODALITY_TRANSFORMS_DIVAE,
         resample_mode: str = "bilinear",
-        corrupt_samples_log: Optional[str] = None,
         dryrun: bool = False,
         force_new_crop: bool = False,
         target_fps: int = 1,
@@ -70,7 +68,7 @@ class SaveVQDataset(Dataset):
         super().__init__()
 
         self.data_root = root
-        self.tokens_root = os.path.join(root, tokens_dir)
+        self.tokens_root = os.path.join(root, tokens_dir).replace("filtered_raw", "4m")
         self.crop_settings_root = os.path.join(
             os.path.abspath(__file__ + "/../"), crop_settings_dir
         )
@@ -87,8 +85,8 @@ class SaveVQDataset(Dataset):
 
         self.dryrun = dryrun
 
-        self.classes = ["train"]  # FIXME. "video_rgb"
-        self.class_to_idx = {"train": 0}
+        self.classes = [dataset_name]
+        self.class_to_idx = {dataset_name: 0}
 
         self.samples = make_dataset(
             root, self.class_to_idx, ("tar",), None, allow_empty=True
@@ -115,7 +113,7 @@ class SaveVQDataset(Dataset):
                     member.name.endswith(ext) for ext in extensions
                 ):
                     file_obj = tar.extractfile(member)
-                    yield BytesIO(file_obj.read())
+                    yield BytesIO(file_obj.read()), member.name
 
     def _extract_frames(self, video_bytes):
         # ensure bytes stream is at beginning
@@ -193,16 +191,15 @@ class SaveVQDataset(Dataset):
         )
 
         all_video_frames = []
+        all_json_names = []
         # Perform augmentations and optionally mask images
-        v_idx = 0
-        for video in videos:
-            # if v_idx > 10:
-            #     break
+        for video, video_filename in videos:
             video_frames = self._extract_frames(video)
 
             # Create or load crop settings
             if os.path.exists(crop_settings_path) and not self.force_new_crop:
                 # XXX: ensure that n_crops is consistent with other modalities and provided crop_settings
+                # otherwise, this will fail
                 try:
                     settings = np.load(crop_settings_path)
                 except:
@@ -230,6 +227,7 @@ class SaveVQDataset(Dataset):
                     os.makedirs(os.path.dirname(crop_settings_path), exist_ok=True)
                     np.save(crop_settings_path, settings)
             current_video = []
+
             for frame in video_frames:
                 current_frame = []
                 for i, j, h, w, h_flip in settings:
@@ -253,11 +251,12 @@ class SaveVQDataset(Dataset):
 
                 current_video.append(torch.stack(current_frame))
             all_video_frames.append(torch.stack(current_video))
-            v_idx += 1
+            all_json_names.append(video_filename)
 
         end = time.time()
         print(f"IDX {index}: Extracting/Augmenting took {end - start} seconds.")
-        return all_video_frames, tokens_path
+        out_dict = {"video_frames": all_video_frames, "json_names": all_json_names}
+        return out_dict, tokens_path
 
 
 def get_feature_extractor(args):
@@ -296,6 +295,7 @@ def main(args):
     print("Start loading ds")
     dataset = SaveVQDataset(
         root=args.data_root,
+        dataset_name=args.dataset_name,
         crop_settings_dir="crop_settings",
         tokens_dir=args.tokens_dir,
         task=loader_task,
@@ -304,7 +304,6 @@ def main(args):
         input_size=args.input_size,
         mask_value=args.mask_value,
         resample_mode=args.resample_mode,
-        corrupt_samples_log=args.corrupt_samples_log,
         force_new_crop=args.force_new_crop,
         target_fps=args.target_fps,
     )
@@ -355,6 +354,10 @@ def main(args):
         print(f"Processing {len(videos_batch)} video shards.")
         print("Processing video shards: ", tokens_paths)
 
+        # get "video_frames" and "json_names" from each shard
+        json_names = [video["json_names"] for video in videos_batch]
+        videos_batch = [video["video_frames"] for video in videos_batch]
+
         num_frames = []
         for shard in videos_batch:
             num_frames.append([len(video) for video in shard])
@@ -397,6 +400,7 @@ def main(args):
                     raise NotImplementedError
 
                 tokens = model.tokenize(sub_batch)
+                # tokens = torch.zeros(sub_batch.shape[0], 14, 14).long().to(device) # (dummy)
                 tokens = rearrange(tokens, "b h w -> b (h w)")
 
             tokens = tokens.detach().cpu().numpy().astype(np.int16)
@@ -433,10 +437,13 @@ def main(args):
                 f"Expected tokens structure {[len(video) for video in videos_batch]}, but got {[len(video) for video in tokens]}."
             )
 
-        for shard_tokens, tokens_path in zip(tokens, tokens_paths):
+        for shard_idx, (shard_tokens, tokens_path) in enumerate(
+            zip(tokens, tokens_paths)
+        ):
             with tarfile.open(tokens_path, "w") as tar:
-                for i, video_tokens in enumerate(shard_tokens):
-                    save_name = f"{i:05d}.npy"
+                for video_idx, video_tokens in enumerate(shard_tokens):
+                    save_name = json_names[shard_idx][video_idx].replace(".mp4", ".npy")
+                    print(save_name)
                     if args.dryrun:
                         print(
                             f"Dryrun: rank {global_rank} -> {tokens_path}/{save_name}"
@@ -448,6 +455,12 @@ def main(args):
                             tarinfo = tarfile.TarInfo(save_name)
                             tarinfo.size = len(bio.getvalue())
                             tar.addfile(tarinfo, bio)
+                    print(f"Saved {save_name} to {tokens_path}")
+
+        # free up memory?
+        del videos_batch
+        del tokens
+        del all_tokens
 
         if pbar is not None:
             pbar.update(1)
@@ -471,13 +484,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_root",
         type=str,
-        default="/store/swissai/a08/data/4m/splits/video_rgb/",  # FIXME
+        default="/store/swissai/a08/data/filtered_raw/howto100m",
         help="Path to video_rgb dataset root",
+    )
+    parser.add_argument(
+        "--dataset_name",
+        type=str,
+        default="v2d_5000",
+        help="Upmost directory of dataset. So dataset is in data_root/dataset_name.",
     )
     parser.add_argument(
         "--n_crops",
         type=int,
-        default="3",
+        default="1",
         help="Number of crops to save. If 1, only a center crop will be saved. \
              If > 1, first image will be center cropped, the subsequent ones will be randomly cropped.",
     )
@@ -530,10 +549,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tokens_dir",
         type=str,
-        default="video_rgb_tok",
+        default="video_tok_rgb",
         help="Suffix to add to the folder under which the tokens are saved.",
     )
-    parser.add_argument("--num_workers", default=4, type=int)
+    parser.add_argument("--num_workers", default=0, type=int)
     parser.add_argument(
         "--pin_mem",
         default=False,

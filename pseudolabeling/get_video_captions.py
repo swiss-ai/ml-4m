@@ -13,53 +13,37 @@
 # limitations under the License.
 import argparse
 import datetime
+import json
 import os
 import random
 import tarfile
 import tempfile
 import time
 from io import BytesIO
-from typing import Optional
-import pdb
-import dataclasses
-import json
 
 import cv2
 import numpy as np
 import torch
-from einops import rearrange
 from PIL import Image
+from tasks.eval.eval_utils import conv_templates
+from tasks.eval.model_utils import load_pllava, pllava_answer
 from torch.utils.data import Dataset
-from torchvision.datasets.folder import find_classes, make_dataset
+from torchvision.datasets.folder import make_dataset
 from torchvision.transforms import Resize
 from tqdm import tqdm
 
 import fourm.utils as utils
-import fourm.utils.clip as clip
-from fourm.data import CenterCropImageAugmenter, RandomCropImageAugmenter
 from fourm.data.modality_info import MODALITY_TRANSFORMS_DIVAE
-from fourm.vq.vqvae import DiVAE
 
-from tasks.eval.model_utils import load_pllava, pllava_answer
-from tasks.eval.eval_utils import conv_templates
-
-
-FEATURE_TASKS = ["CLIP-B16"]
 VIDEO_EXTENSIONS = (".mp4",)
 
+# TODO: "In the image" --> too short scenes?
+# TODO: add len of clip/num_clip_frames to prompt?
 QUERY_ACTION_BASE = (
     "You are to assist me in accomplishing a task about the input video."
     "# Task\n"
     "Describe the main characters and actions in the provided video, without mentioning the background.\n"
 )
-
-
-def find_image_extension(root_dir):
-    for root, dirs, files in os.walk(root_dir):
-        for file in files:
-            if file:
-                return os.path.splitext(file)[1]
-    return None
 
 
 def get_index(num_frames, num_segments):
@@ -71,92 +55,35 @@ def get_index(num_frames, num_segments):
     return offsets
 
 
-@dataclasses.dataclass
-class MetaDataRGBClass:
-    # string, but default is None
-    shard: str
-    metadata_dir: Optional[str] = None
-    video_rgb_dir: Optional[str] = None
-
-
-class SaveVQDataset(Dataset):
+class SaveCaptionDataset(Dataset):
     def __init__(
         self,
         root: str,
-        metadata_dir: str,
-        video_rgb_dir: str,
+        dataset_name: str,
         captions_dir: str,
-        task: str,
         input_size: int = 336,
-        task_transforms: dict = MODALITY_TRANSFORMS_DIVAE,
-        resample_mode: str = "bilinear",
-        corrupt_samples_log: Optional[str] = None,
         dryrun: bool = False,
         n_total_frames: int = 16,
     ):
         super().__init__()
 
         self.data_root = root
-        self.metadata_root = os.path.join(
-            root, metadata_dir
-        )  # XXX: in general, paths are a bit hacky now. Clean up later.
-        self.caption_root = os.path.join(root, captions_dir)
-        print(f"Using:\nData: {self.data_root}")
+
+        self.caption_root = os.path.join(root, captions_dir).replace(
+            "filtered_raw", "4m"
+        )
+        print(f"Using:\nData: {self.data_root}\nCaptions: {self.caption_root}")
         self.input_size = input_size
-        self.task = task
-        self.task_transforms = task_transforms
-        self.resample_mode = resample_mode
         self.n_total_frames = n_total_frames
 
         self.dryrun = dryrun
 
-        # FIXME
-        self.classes = ["train"]
-        self.class_to_idx = {"train": 0}
+        self.classes = [dataset_name]
+        self.class_to_idx = {dataset_name: 0}
 
-        self.all_samples = make_dataset(
+        self.samples = make_dataset(
             root, self.class_to_idx, ("tar",), None, allow_empty=True
         )
-        # find samples with video_rgb_dir in them
-        # video_rgb_idx = self.class_to_idx[video_rgb_dir]
-        video_rgb_idx = 0
-        # metadata_idx = self.class_to_idx[metadata_dir]
-        self.samples = []
-        # ensure both idcs have the same tarfiles
-        # for sample in self.all_samples:
-        #     print(sample)
-        #     if sample[1] == metadata_idx:
-        #         # TODO: should we call shards "shard-000.tar" or just "000.tar" (CURRENTLY INCONSISTENT)
-        #         self.samples.append(
-        #             MetaDataRGBClass(
-        #                 metadata_dir=sample[0],
-        #                 shard=sample[0].split("/")[-1].split("-")[-1],
-        #             )
-        #         )
-        # for sample in self.all_samples:
-        #     if sample[1] == video_rgb_idx:
-        #         # check self.samples and see if there is a matching .tar
-        #         shard = sample[0].split("/")[-1]
-        #         for self_sample in self.samples:
-        #             if self_sample.shard == shard:
-        #                 self_sample.video_rgb_dir = sample[0]
-        #                 break
-        # for sample in self.samples:
-        #     if sample.metadata_dir is None or sample.video_rgb_dir is None:
-        #         print(f"Could not find matching metadata and video_rgb for {sample}")
-
-        # only use samples from video_rgb_idx
-        for sample in self.all_samples:
-            print(sample)
-            if sample[1] == video_rgb_idx:
-                # TODO: should we call shards "shard-000.tar" or just "000.tar" (CURRENTLY INCONSISTENT)
-                self.samples.append(
-                    MetaDataRGBClass(
-                        video_rgb_dir=sample[0],
-                        shard=sample[0].split("/")[-1].split("-")[-1],
-                    )
-                )
-        self.samples = [dataclasses.asdict(sample) for sample in self.samples]
 
     def loader(self, path, extensions):
         with tarfile.open(path, "r") as tar:
@@ -179,13 +106,12 @@ class SaveVQDataset(Dataset):
                         json_dict = None
 
                     with tar.extractfile(member) as file_obj:
-                        yield BytesIO(file_obj.read()), json_dict
+                        yield BytesIO(file_obj.read()), json_dict, json_member.name
 
     def load_video(self, video_bytes, cuts):
         # TODO: check resolution
         transforms = Resize(size=self.input_size)
 
-        # TODO: wok around decord?!
         video_bytes.seek(0)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
@@ -197,17 +123,18 @@ class SaveVQDataset(Dataset):
             os.remove(temp_file_name)
             raise ValueError("Failed to open video stream from bytes")
 
-        num_frames = cuts[-1][1]
-        print(num_frames)
+        # num_frames = cuts[-1][1]
+
         # cuts is a list of lists, each containing 2 ints: start/end of video.
         clips = []
         for cut in cuts:
             # sample self.n_total_frames frames uniformly from the cut
             clip_indices = get_index(cut[1] - cut[0], self.n_total_frames) + cut[0]
             images_group = []
-                
-            frame_count = 0
-            
+
+            # start only from the beginning of the cut
+            frame_count = cut[0]
+
             while True:
                 # Check if frame should be extracted
                 if frame_count in clip_indices:
@@ -222,7 +149,10 @@ class SaveVQDataset(Dataset):
                     # Skip frames to achieve the desired FPS
                     cap.grab()  # Move to the next frame without decoding
                 frame_count += 1
-                
+                # Check if we have reached the end of the cut
+                if frame_count > clip_indices[-1]:
+                    break
+
             clips.append(images_group)
         cap.release()
         os.remove(temp_file_name)
@@ -247,37 +177,31 @@ class SaveVQDataset(Dataset):
             str: Path to the current shard of videos (tokenized/output).
         """
 
-        paths = self.samples[index]
-        # TODO: clean up this
-        shard, metadata_dir, video_rgb_dir = (
-            paths["shard"],
-            paths["metadata_dir"],
-            paths["video_rgb_dir"],
-        )
-        path = video_rgb_dir
-        videos = self.loader(video_rgb_dir, VIDEO_EXTENSIONS)
+        path, _ = self.samples[index]
+        videos = self.loader(path, VIDEO_EXTENSIONS)
 
-        start = time.time()
-
-        class_id, file_id = path.split("/")[-2:]
+        _, file_id = path.split("/")[-2:]
         file_id = file_id.split(".")[0]
 
         caption_path = os.path.join(self.caption_root, f"{file_id}.tar")
-        print(caption_path)
+
         if not self.dryrun:
             os.makedirs(os.path.dirname(caption_path), exist_ok=True)
 
         all_video_frames = []
+        all_json_names = []
         # Perform augmentations and optionally mask images
-        for video, cut_json in videos:
+        for video, cut_json, json_name in videos:
             if cut_json["status"] != "success":
                 print("FAIL: ", cut_json)
                 continue
             cuts = cut_json["cuts"]["cuts_original_fps"]
             full_video = self.load_video(video_bytes=video, cuts=cuts)
             all_video_frames.append(full_video)
+            all_json_names.append(json_name)
 
-        return all_video_frames, caption_path
+        out_dict = {"video_frames": all_video_frames, "json_names": all_json_names}
+        return out_dict, caption_path
 
 
 def video_collate_fn(batch):
@@ -335,15 +259,11 @@ def main(args):
     sampler_rank = global_rank
 
     print("start loading ds")
-    dataset = SaveVQDataset(
+    dataset = SaveCaptionDataset(
         root=args.data_root,
-        metadata_dir=args.metadata_dir,
-        video_rgb_dir=args.video_rgb_dir,
+        dataset_name=args.dataset_name,
         captions_dir=args.caption_dir,
-        task="caption",  # TODO: check
         input_size=args.input_size,  # TODO: check default, 336 fine?
-        resample_mode=args.resample_mode,
-        corrupt_samples_log=args.corrupt_samples_log,
         n_total_frames=args.n_total_frames,
     )
     print("loaded dataset!")
@@ -380,7 +300,7 @@ def main(args):
         # Filter out already saved video shards
         videos_batch_filtered, tar_paths_filtered = [], []
         for imgs, tar_path in zip(videos_batch, tar_paths):
-            if not os.path.exists(tar_path) or args.corrupt_samples_log is not None:
+            if not os.path.exists(tar_path):
                 videos_batch_filtered.append(imgs)
                 tar_paths_filtered.append(tar_path)
         if len(videos_batch_filtered) == 0:
@@ -397,9 +317,13 @@ def main(args):
         # TODO: batch-ify (but super cumbersome, PLLaVA does not provide this natively)
         for shard in videos_batch:
             shard_caption = []
-            for video in tqdm(shard):
+            for video_content, video_path in zip(
+                shard["video_frames"], shard["json_names"]
+            ):
+                # video_content = video["video_frames"]
+                # video_path = video["json_names"]
                 video_caption = []
-                for clip in video:
+                for clip in video_content:
                     llm_response, _ = pllava_answer(
                         conv=conv,
                         model=model,
@@ -412,21 +336,19 @@ def main(args):
                     conv = conv_templates[args.conv_mode].copy()
                     conv.user_query(QUERY_ACTION_BASE, None, None, is_mm=True)
                     video_caption.append(llm_response)
-                shard_caption.append(video_caption)
+                shard_caption.append(
+                    {"video_path": video_path, "captions": video_caption}
+                )
             all_captions.append(shard_caption)
-            # TODO: "In the image" --> too short scenes?
-            # TODO: add len of clip/num_clip_frames to prompt?
 
         print(f"Tokenized video shards.")
 
         print("Saving tokenized video shards to disk.")
-        # TODO: save, to jsonl? How? Add other info like clips?
+
         for shard_captions, tar_path in zip(all_captions, tar_paths):
             with tarfile.open(tar_path, "w") as tar:
-                for i, video_captions in enumerate(shard_captions):
-                    # TODO: prefix with shard-... or not?
-                    # TODO: if we save like this here, does this even retain intra-tar order?
-                    save_name = f"{i:05d}.json"
+                for video_captions in shard_captions:
+                    save_name = video_captions["video_path"]
                     if args.dryrun:
                         print(
                             f"Dryrun: rank {global_rank} -> {video_captions}/{save_name}"
@@ -434,9 +356,10 @@ def main(args):
                     else:
                         # save to json
                         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-                            f.write(json.dumps(video_captions))
+                            f.write(json.dumps(video_captions["captions"], indent=4))
                         tar.add(f.name, save_name)
                         os.remove(f.name)
+                    # print(f"Saved {save_name} to {tar_path}")
 
         if pbar is not None:
             pbar.update(1)
@@ -449,7 +372,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog="VQ token saver")
+    parser = argparse.ArgumentParser(prog="Video clip caption saver")
 
     parser.add_argument(
         "--pllava_dir",
@@ -460,37 +383,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_root",
         type=str,
-        default="/store/swissai/a08/data/4m/splits/video_rgb/",  # FIXME
+        default="/store/swissai/a08/data/filtered_raw/howto100m",
         help="Path to dataset root",
     )
-    # FIXME: replace (temporarily) with whisperX
     parser.add_argument(
-        "--metadata_dir",
+        "--dataset_name",
         type=str,
-        default="video_metadata",
-        help="Relative path from metadata. From data_root/train.",
-    )
-    parser.add_argument(
-        "--video_rgb_dir",
-        type=str,
-        default="video_rgb",
-        help="Relative path from data_root. From data_root/train.",
+        default="v2d_5000",
+        help="Upmost directory of dataset. So dataset is in data_root/dataset_name.",
     )
     parser.add_argument("--input_size", type=int, default=336, help="Image size")
-    parser.add_argument("--task", type=str, default="caption", help="Task name")
-    parser.add_argument(
-        "--resample_mode",
-        type=str,
-        default=None,
-        help="PIL resample mode for resizing loaded images. One out of ['bilinear', 'bicubic', 'nearest', None]. (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--corrupt_samples_log",
-        type=str,
-        default=None,
-        help="Path to log file with corrupted samples from find_corrupted_pseudolabels.py. \
-              If provided, only corrupted samples will be re-tokenized.",
-    )
+
     parser.add_argument(
         "--verbose",
         action="store_true",
