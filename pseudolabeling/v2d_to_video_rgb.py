@@ -107,6 +107,9 @@ def main():
     args = parser.parse_args()
     setup_logging(args.log_file)
 
+    if "filtered_raw" not in args.input_dir:
+        raise ValueError(f"Expected input dir to be a subdir of `filtered_raw/`, instead received {args.input_dir}.")
+
     output_dir = (
         args.output_dir
         if args.output_dir is not None
