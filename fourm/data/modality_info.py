@@ -29,6 +29,11 @@ from fourm.data.modality_transforms import (
     ColorPaletteTransform,
     SAMInstanceTokTransform,
     SAMInstanceTransform,
+    VideoDescriptionTransform,
+    VideoDetectionTransform,
+    VideoRGBTransform,
+    VideoTokTransform,
+    VideoTranscriptTransform,
 )
 from fourm.models.decoder_embeddings import ImageTokenDecoderEmbedding, SequenceDecoderEmbedding
 from fourm.models.encoder_embeddings import (
@@ -39,6 +44,7 @@ from fourm.models.encoder_embeddings import (
 )
 from fourm.utils import generate_uint15_hash
 
+# Specifications about different modalities
 MODALITY_INFO = {
     # 4M-7 modalities
     "rgb@224": {
@@ -406,6 +412,38 @@ MODALITY_INFO = {
     },
 }
 
+VIDEO_MODALITY_INFO = {
+    ### Video modalities
+    # TODO: do we need to keep the image versions? These probably should generalize over those, right?
+    "video_rgb@224": {
+        **MODALITY_INFO["rgb@224"],
+        "id": generate_uint15_hash("video_rgb@224"),
+        "path": "video_rgb",  # TODO: video_rgb or keep aas rgb? (probably only keep rgb if this generalizes over single images too)
+    },
+    "video_description": {
+        **MODALITY_INFO["caption"],  # TODO: do we want to increase the default 'max_tokens/max_length' from 256?
+        "id": generate_uint15_hash("video_description"),
+    },
+    "video_transcript": {
+        **MODALITY_INFO["caption"],  # TODO: do we want to increase the default 'max_tokens/max_length' from 256?
+        "id": generate_uint15_hash("video_transcript"),
+    },
+    "video_det": {
+        **MODALITY_INFO["det"],
+        "id": generate_uint15_hash("video_det"),
+    },
+    "video_tok_rgb@224": {
+        **MODALITY_INFO["tok_rgb@224"],
+        "id": generate_uint15_hash("video_tok_rgb@224"),
+    },
+    "video_tok_clip@224": {
+        **MODALITY_INFO["tok_clip@224"],
+        "id": generate_uint15_hash("video_tok_clip@224"),
+    },
+}
+
+MODALITY_INFO = {**MODALITY_INFO, **VIDEO_MODALITY_INFO}
+
 # Note: @res suffix is ignored for modality transforms
 MODALITY_TRANSFORMS = {
     # 4M-7 modalities
@@ -414,7 +452,7 @@ MODALITY_TRANSFORMS = {
     "det": DetectionTransform(
         det_threshold=0.6, det_max_instances=None, bbox_order="dist_to_orig", coord_bins=1000, min_visibility=0.0
     ),
-    "tok_rgb": TokTransform(),
+    "tok_rgb": TokTransform(),  # tok_ indicates its a token representation
     "tok_depth": TokTransform(),
     "tok_normal": TokTransform(),
     "tok_semseg": TokTransform(),
@@ -435,6 +473,15 @@ MODALITY_TRANSFORMS = {
     "tok_imagebind_global": TokTransform(),
     # Other
     "mask_valid": MaskTransform(mask_pool_size=1),
+    # Video
+    "video_rgb": VideoRGBTransform(imagenet_default_mean_and_std=True),  # TODO: check parameters
+    "video_tok_rgb": VideoTokTransform(),  # tok_ indicates its a token representation
+    "video_tok_clip": VideoTokTransform(),  # TODO: check parameters
+    "video_description": VideoDescriptionTransform(aligned_captions=True),  # TODO: check parameters
+    "video_transcript": VideoTranscriptTransform(aligned_captions=True),  # TODO: check parameters
+    "video_det": VideoDetectionTransform(
+        det_threshold=0.6, det_max_instances=None, bbox_order="dist_to_orig", coord_bins=1000, min_visibility=0.0
+    ),  # TODO: check parameters
 }
 
 MODALITY_TRANSFORMS_DIVAE = {

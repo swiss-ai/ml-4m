@@ -1,0 +1,11 @@
+# What's up with the naming configs here?
+video_rgb@224:
+  input_alphas: [1000.0, 0.5]
+  target_alphas: [0., 0.]  # RGB is not a target
+video_tok_rgb@224:
+  input_alphas: [0., 0.5]
+  target_alphas: [0.5, 0.5]
+det:
+  input_alphas: [0., 0.5]
+  target_alphas: [0.5, 0.5]
+  keep: ['random', 'random']

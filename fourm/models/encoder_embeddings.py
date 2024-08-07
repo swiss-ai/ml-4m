@@ -20,6 +20,7 @@ from einops import rearrange, repeat
 from .fm_utils import build_1d_sincos_posemb, build_2d_sincos_posemb, pair
 
 class SequenceEncoderEmbedding(nn.Module):
+    # NOTE(Kev): embedding anything that's a sequence, such as text, or bounding boxes (it's a sequence of coordinates) output shape: (HS, seq_len)
     """Embedding module for encoding sequence inputs, like captions or a sequence of objects.
 
     Args:
@@ -121,6 +122,7 @@ class SequenceEncoderEmbedding(nn.Module):
         return d
     
 class ImageTokenEncoderEmbedding(nn.Module):
+    # Used for embedding anything that's gridlike (n, n), such as tokenized RGB, clip, etc.
     """Embedding module for tokenized spatial inputs.
 
     Args:
@@ -202,7 +204,7 @@ class ImageTokenEncoderEmbedding(nn.Module):
         # Map to embedding
         x = self.token_emb(ids)
 
-        # Create positional embedding + modality embedding
+        # Create positional embedding + modality embedding # here is where the modality gets encoded
         x_emb = repeat(self.pos_emb + self.mod_emb, '() n d -> b n d', b=B)
 
         d['x'] = x
@@ -212,6 +214,7 @@ class ImageTokenEncoderEmbedding(nn.Module):
 
 
 class ImageEncoderEmbedding(nn.Module):
+    # Encode Raw RGB input - split the image into patches and encode each patch into the embedding size
     """Embedding module for spatial inputs, like images or feature maps.
     Creates tokens from patches over the image.
 
@@ -310,6 +313,7 @@ class ImageEncoderEmbedding(nn.Module):
 
 
 class SequenceEmbEncoderEmbedding(nn.Module):
+    # input shape: (t5 emb size, seq length) -> (4m HS, seq length)
     """Adapter for sequence emb inputs, like T5-XXL, CLIP text embeddings.
 
     Args:
