@@ -17,7 +17,7 @@ dependencies = [
     "diffusers==0.20.0",
     "einops>=0.7.0",
     "ftfy==6.1.0",
-    "huggingface_hub>=0.20.0",
+    "huggingface_hub==0.25.0",
     "matplotlib>=3.6.2",
     "numpy>=1.26.4",
     "opencv_python>=4.9.0.80",
@@ -35,6 +35,7 @@ dependencies = [
     "tqdm>=4.64.1",
     "wandb>=0.13.5",
     "webdataset>=0.2.86",
+    "jsonlines",
 ]
 
 [project.optional-dependencies]
