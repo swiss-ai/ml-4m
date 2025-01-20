@@ -1,0 +1,6 @@
+1. Do we need modality transforms for video? (assuming we tokenize the video to (seq_len, time))
+    - First define modality info and transforms, if needed (e.g. )
+    - Make a clever masking temporal schema
+    - then pass to encoder embedding to convert to (hs, seq_len, time)
+        - TODO: rn encoder embeddings only deal with (seq_len,) objects. Need to modify/add new class so that it can deal with (seq_len, time) objects
+2. 

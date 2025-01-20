@@ -136,6 +136,7 @@ def build_fm_transfer_dataset(
 def _keyless_map(data, f, handler=reraise_exception):
     """Map samples without adding __key__."""
     for sample in data:
+        import pdb; pdb.set_trace()
         try:
             result = f(sample)
         except Exception as exn:
@@ -390,7 +391,7 @@ def build_wds_fm_pretraining_dataloader(
     
     if batch_size is not None:
         # Perform multi-threaded dataloading
-        return wds.WebLoader(datapipe, num_workers=num_workers, batch_size=None)
+        return wds.WebLoader(datapipe, num_workers=0, batch_size=None)
     else:
         return datapipe
 
@@ -459,7 +460,7 @@ def build_huggingface_pretraining_dataloader(
         UnifiedDataTransform(transforms_dict=modality_transforms, image_augmenter=image_augmenter),
         UnifiedMasking(modality_info=modality_info, text_tokenizer=text_tokenizer,
                        input_tokens_range=input_tokens_range, target_tokens_range=target_tokens_range)
-    ])
+    ]) # This executes the masking
     
     datapipe = wds.DataPipeline(
         dataset,
@@ -552,6 +553,6 @@ def build_mixture_dataloader(data_iters, weights, modality_info, batch_size, num
         wds.batched(batch_size, collation_fn=default_collate, partial=False),
     ).with_epoch(epoch_size // (num_gpus * num_workers * batch_size)) # Pre-define iterator length
     
-    mixture_loader = wds.WebLoader(mixture_pipe, num_workers=num_workers, batch_size=None)
+    mixture_loader = wds.WebLoader(mixture_pipe, num_workers=0, batch_size=None)
     
     return mixture_loader

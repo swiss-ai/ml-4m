@@ -297,13 +297,14 @@ def main(args):
     print('Tokenization time {}'.format(total_time_str))
 
 
+# TODO: modify for video case
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog="VQ token saver")
 
     parser.add_argument(
         "--tokenizer_id", type=str, default='cc12m/rgb_ViTB-UNetP4_16k_224-448',
         help="ID of tokenizer to load."
-    )
+    ) # TODO: says which tokenizer to use, need to download the weights from HF and save to this directory.
     parser.add_argument(
         "--tokenizers_root", type=str, default='./tokenizer_ckpts',
         help="Path where tokenizer checkpoints are saved."
@@ -311,7 +312,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--data_root", type=str, default='/path/to/dataset',
         help="Path to dataset root"
-    )
+    ) # TODO: path to dataset (dataset needs to be stored in the format of the actual images, not webd here)
     parser.add_argument(
         "--split", type=str, default='train',
         help="train or val"

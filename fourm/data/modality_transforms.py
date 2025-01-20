@@ -13,6 +13,7 @@
 # limitations under the License.
 import gzip
 import json
+import jsonlines
 import random
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
@@ -40,9 +41,11 @@ from fourm.utils.data_constants import (
     PAD_MASK_VALUE,
 )
 
+# start with data, then models
 
 # The @-symbol is used to specify the resolution of a modality. Syntax: modality@resolution
 def get_transform_key(mod_name):
+    # TODO: do we need to modify this for the video keys?
     return mod_name.split("@")[0]
 
 
@@ -149,7 +152,6 @@ class UnifiedDataTransform(object):
 
 
 class AbstractTransform(ABC):
-
     @abstractmethod
     def load(self, sample):
         pass
@@ -177,7 +179,6 @@ class AbstractTransform(ABC):
 
 
 class ImageTransform(AbstractTransform):
-
     @staticmethod
     def pil_loader(path: str) -> Image.Image:
         # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
@@ -216,8 +217,10 @@ class ImageTransform(AbstractTransform):
         return img
 
 
-class RGBTransform(ImageTransform):
-
+class RGBTransform(
+    ImageTransform
+):  # For RGB in raw format for 4M because it's passed in directly (and also training tokenizer)
+    
     def __init__(self, imagenet_default_mean_and_std=True, color_jitter=False, color_jitter_strength=0.5):
         self.rgb_mean = IMAGENET_INCEPTION_MEAN if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_MEAN
         self.rgb_std = IMAGENET_INCEPTION_STD if not imagenet_default_mean_and_std else IMAGENET_DEFAULT_STD
@@ -283,6 +286,47 @@ class RGBTransform(ImageTransform):
         return sample
 
 
+class VideoRGBTransform(RGBTransform):
+    """
+    A video transform applied to a sequence of RGB images.
+    For now, I'm assuming the input to the load function points to a webdataset containing mp4 which contains the frames in the specified modality (e.g, RGB).
+    This format almost certainly is subject to change. TODO: figure out what the right format for this input should be (aka, how are we storing the raw videos?)
+
+    Output: a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB). OR should this already be unrolled into something like (num_frames * C, H, W)?
+    """
+
+    # raise NotImplementedError("I'm not ")
+    def load(self, path):
+        raise NotImplementedError(
+            "TODO: implement the loader for video frames, probably from a webdataset. It might be helpful to see how to load data from video2dataset format into a dataloader here: https://github.com/swiss-ai/ml-4m/blob/kdu/pseudolabeler/notebooks/pseudolabeler.py. However we don't want to load it into a dataset so maybe that's overkill? Instead might be helpful to just load directly using webd utilities."
+        )
+
+    def preprocess(self, sample):
+        raise NotImplementedError(
+            "TODO: what preprocessing do we want? do we also want to convert to RGB and do color jitter like with normal RGBTransform?"
+        )
+
+    def image_augment(
+        self,
+        v,
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx: Optional[int],
+        resample_mode: str = None,
+    ):
+        raise NotImplementedError(
+            "TODO: what augmentations do we want? do we also want to same as with normal image RGBTransform?"
+        )
+
+    def postprocess(self, v):
+        # TODO: deicde
+        raise NotImplementedError(
+            "TODO: postprocess should convert the frames into a tensor of shape (num_frames, C, H, W) where C is the number of channels (3 for RGB)."
+        )
+
+
 class DepthTransform(ImageTransform):
 
     def __init__(self, standardize_depth=True):
@@ -336,7 +380,6 @@ class DepthTransform(ImageTransform):
 
 
 class NormalTransform(ImageTransform):
-
     def __init__(self, standardize_surface_normals=False):
         self.normal_mean = (0.5, 0.5, 0.5) if not standardize_surface_normals else IMAGENET_SURFACE_NORMAL_MEAN
         self.normal_std = (0.5, 0.5, 0.5) if not standardize_surface_normals else IMAGENET_SURFACE_NORMAL_STD
@@ -382,6 +425,7 @@ class NormalTransform(ImageTransform):
 
 
 class SemsegTransform(ImageTransform):
+    # apply for learning the tokens?
 
     def __init__(
         self, scale_factor=1.0, shift_idx_by_one=False, id_mapping: Optional[Dict] = None, select_channel=None
@@ -393,7 +437,7 @@ class SemsegTransform(ImageTransform):
 
     def map_semseg_values(self, sample):
         sample = np.asarray(sample)
-        mapping_fn = lambda x: self.id_mapping.get(x, x)
+        mapping_fn = lambda x: self.id_mapping.get(x, x)  # noqa: E731
         sample = np.vectorize(mapping_fn)(sample)
         sample = Image.fromarray(sample, mode="P")
         return sample
@@ -503,7 +547,7 @@ class SAMInstanceTransform(AbstractTransform):
                     lmbda = np.linalg.solve(A, b)
                     if 0 <= lmbda[0] <= 1 and 0 <= lmbda[1] <= 1:
                         output.append(lmbda[1] * xn + (1 - lmbda[1]) * x)
-                except:
+                except:  # noqa: E722
                     continue
             return output
 
@@ -677,6 +721,7 @@ class MaskTransform(ImageTransform):
 
 
 class TokTransform(AbstractTransform):
+    # Transformation on the tokens
 
     def __init__(self):
         pass
@@ -703,13 +748,51 @@ class TokTransform(AbstractTransform):
                 "Crop settings / augmentation index are missing but a pre-tokenized modality is being used"
             )
         v = torch.tensor(v[rand_aug_idx])
-        return v
+        return v  # Since we augment before saving (create 5 augmented versions of the same image), in this transform you randomly sample one of the augmentations to work with.
 
     def postprocess(self, sample):
         return sample
 
 
-class DetectionTransform(AbstractTransform):
+class VideoTokTransform(AbstractTransform):
+    """
+    Assume input tokens is an ndarray of shape (num_frames, num_tokens_per_frame).
+    Transform the tokens to a torch tensor of shape (num_frames * num_tokens,).
+    """
+    # Transformation on the tokens
+
+    def __init__(self):
+        pass
+
+    def load(self, path):
+        sample = np.load(path).astype(int)
+        return sample  # shape: (num_frames, num_tokens_per_frame)
+
+    def preprocess(self, sample):
+        return sample
+
+    def image_augment(
+        self,
+        v,
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx: Optional[int],
+        resample_mode: str = None,
+    ):
+        # TODO: do we want an image_augment for videos frames? What would those even look like?
+        # only implement this if we implement augmentations during the tokenization/saving process?
+        print(
+            "WARNING: no image augmentations implemented for video tokens at the moment. Decide on what we should do and then remove this warning/implement as needed."
+        )
+        return v
+
+    def postprocess(self, sample):
+        return torch.ravel(sample)  # shape: (num_frames * num_tokens_per_frame,)
+
+
+class DetectionTransform(AbstractTransform):  # bounding boxes
 
     def __init__(
         self,
@@ -751,13 +834,13 @@ class DetectionTransform(AbstractTransform):
     def shuffle_bboxes(bboxes):
         return sorted(bboxes, key=lambda x: random.random())
 
-    def convert_detection_instance(self, instances):
-        """Convert instances dict to list of lists where each list takes the form:
+    def convert_detection_instance(self, instances: dict) -> List[Tuple]:
+        """Convert instances dict to list of tuples where each list takes the form:
         [xmin, ymin, xmax, ymax, class_name, score]
         """
 
         instances = [
-            inst["boxes"] + [inst["class_name"], inst["score"]]
+            tuple(inst["boxes"] + [inst["class_name"], inst["score"]])
             for inst in instances
             if inst["score"] >= self.det_threshold
         ]
@@ -804,7 +887,7 @@ class DetectionTransform(AbstractTransform):
 
         return self.bbox_order(bboxes)
 
-    def convert_bboxes_to_string(self, bboxes: List[Tuple]):
+    def convert_bboxes_to_string(self, bboxes: List[Tuple]) -> str:
         """Convert bounding boxes to a string.
         xmin, ymin, xmax, ymax are mapped to v0, v1, v2, v3 special tokens.
 
@@ -864,8 +947,129 @@ class DetectionTransform(AbstractTransform):
         return bboxes
 
 
-class CaptionTransform(AbstractTransform):
+class VideoDetectionTransform(DetectionTransform):
+    """
+    Bounding boxes for videos. Read bounding boxes for a given video (sequence of frames) as a JSONL file containing the list of bounding boxes.
 
+    Example video bounding boxes input:
+    [
+        # FRAME 0 Bounding boxes
+        {
+            "num_instances": 5,
+            "image_height": 512,
+            "image_width": 906,
+            "instances": [
+                {
+                    "boxes": [
+                        0.4229210317134857,
+                        0.00020096010121051222,
+                        0.5715101361274719,
+                        0.13699540495872498
+                    ],
+                    "score": 0.9029952883720398,
+                    "class_id": 74,
+                    "class_name": "clock",
+                    "segmentation": [
+                        [
+                            0.5055187637969095,
+                            0.1337890625,
+                            ...
+                        ]
+                    ]
+                },
+                {
+                    "boxes": [
+                        ...
+                    ],
+                    ...
+                },
+                    ...
+            ]
+        },
+        # FRAME 1 Bounding boxes
+        {
+            "num_instances": 5,
+            "image_height": 512,
+            "image_width": 906,
+            "instances": [
+                ...,
+            ],
+            ...
+        }
+    ]
+
+    Input: path to a List[dicts] representing bounding boxes representations for each frame.
+    Output: a str representing the bounding boxes for each frame in the video, separated by special frame tokens to indicate which frame each bounding box representation corresponds to.
+    """
+
+    def load(self, path):
+        """
+        Load jsonl file containing bounding box representations per frame.
+        """
+        with jsonlines.open(path, "r") as jsonl_f:
+            bbs_per_frame = [obj for obj in jsonl_f]
+
+        return bbs_per_frame
+
+    def preprocess(self, sample: List[dict]) -> List[List[tuple]]:
+        """
+        Given a list of dicts (each element in the list is a frame, each dict is a representation of bounding boxes for that frame),
+        convert the instances within each frame's bounding boxes representation.
+        # TODO: any issue with returning a list of lists here? We sorta might break the type consistency of the class? I'm not sure how robust it is.
+            # ^ Actually I think this is fine because it just gets passed into the image_augment function, so as long as that's implemented correspondingly we're good.
+
+        Returns:
+            List of lists of tuples.
+            The outermost list represents each frame.
+            The middle list represents each bounding box instances in that frame.
+            The innermost tuple is the actual representation of a bounding box instance (of the form [xmin, ymin, xmax, ymax, class_name, score]).
+        """
+        instances = [frame["instances"] for frame in sample]
+        return self.convert_detection_instance(instances)
+
+    def image_augment(
+        self,
+        bboxes_per_frame: List[List[Tuple]],
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx=None,
+        resample_mode: str = None,
+    ) -> List[List[Tuple]]:
+        """
+        Apply bbox augmentations to the bounding boxes of each frame (TODO: do we actually wanna do this? Would some of these augmentations break the video nature/spatio-temporal relations/etc.?)
+        """
+        bboxes_per_frame = []
+        for bboxes in bboxes_per_frame:
+            bboxes = self.bboxes_crop_and_resize(bboxes, crop_coords, orig_size)
+            bboxes = self.bboxes_hflip(bboxes, target_size, flip)
+            bboxes = self.order_and_filter_bboxes(bboxes)
+
+            bboxes_per_frame.append(bboxes)
+
+        return bboxes_per_frame
+
+    def postprocess(self, bboxes_per_frame):
+        """
+        Given bounding box representations per frame, should return a string like:
+        "<frame_0_token> bbox0 string representation blah blah blah <bbox_1> ... <frame_1_token>bbox0 string representation blah blah blah<bbox_1> ... <eos_token>"
+        """
+        if self.return_raw:
+            raise NotImplementedError(
+                "I'm not sure what the correct behavior of returning bboxes_per_frame should be when returned raw, so throwing error for now. Set return_raw=False to avoid this."
+            )
+            return bboxes_per_frame
+        output_str = "<frame_0_token>"  # TODO: implement the <frame_i_token> special tokens better than just hardcoding things here.
+        for i, bboxes in enumerate(bboxes_per_frame):
+            bboxes_str = self.convert_bboxes_to_string(bboxes_per_frame)
+            output_str += bboxes_str
+            output_str += f"<frame_{i+1}_token>"
+        output_str += "<eos_token>"  # TODO: Do we need to explicitly add EOS token here? If yes, we need to do this so it adds the actual eos_token str of the model not just this hardcoded string.
+        return output_str
+
+
+class CaptionTransform(AbstractTransform):
     def __init__(self, aligned_captions=True, no_aug=False):
         self.aligned_captions = aligned_captions
         self.no_aug = no_aug
@@ -913,8 +1117,174 @@ class CaptionTransform(AbstractTransform):
         return sample
 
 
-class CaptionEmbTransform(AbstractTransform):
+class VideoTranscriptTransform(AbstractTransform):
+    def __init__(self, aligned_captions=True, no_aug=False):
+        # TODO: what are these args? Do we still need them?
+        self.aligned_captions = aligned_captions
+        self.no_aug = no_aug
 
+    def load(self, path) -> List[dict]:
+        # TODO: decide on the representation of the input description (how do we know which frames each caption maps to?)
+        # Caption can either be stored as .txt or .json.gz (in which case it's a list of dicts)
+        """
+        For now, assume we have something like a jsonlines of transcripts for each clip/sequence of frames in a video.:
+        [
+            {
+                "transcript": "here's a transcript",
+                "start_frame_index": 0,
+                "end_frame_index": 5,
+            },
+            {
+                "transcript": "here's another transcript",
+                "start_frame_index": 10,
+                "end_frame_index": 13,
+            } # Note that the transcript need not be consecutive in all frames, e.g., you can see a skip from frames 5-10 with no transcripts.
+        ]
+        """
+        with jsonlines.open(path, "r") as jsonl_f:
+            transcripts_per_clip = [obj for obj in jsonl_f]
+
+        return transcripts_per_clip
+
+    def preprocess(self, sample):
+        return sample
+
+    def image_augment(
+        self,
+        val,
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx: Optional[int],
+        resample_mode: str = None,
+    ) -> List[dict]:
+        # TODO: decide what augmentaitons might be appropriate for descriptions here?
+        print(
+            "WARNING: no augmentations implemented for transcripts yet. Decide whether to augment/what these should be and then remove this warning."
+        )
+        return val
+
+    def postprocess(self, sample: List[dict]) -> str:
+        """
+        Given a list of {text, start_frame, end_frame} dicts, we want to return a string in the format:
+        <0th_start_frame_token>0th transcript text blah blah<0th_end_frame_token><1st_start_frame_token>1st transcript text blah blah<1st_end_frame_token>...<eos_token>.
+        Example: given
+        [
+            {
+                "transcript": "here's a transcript",
+                "start_frame_index": 0,
+                "end_frame_index": 5,
+            },
+            {
+                "transcript": "here's another transcript",
+                "start_frame_index": 10,
+                "end_frame_index": 13,
+            } # Note that the transcript need not be consecutive in all frames, e.g., you can see a skip from frames 5-10 with no transcripts.
+        ]
+
+        We should have
+        <frame_0_token>here's a transcript<frame_5_token><frame_10_token>here's another transcript<frame_13_token><eos_token>
+        """
+        output_str = ""
+        for transcript_dict in sample:
+            start_frame_token = f"<frame_{transcript_dict['start_frame_index']}_token>"
+            end_frame_token = f"<frame_{transcript_dict['end_frame_index']}_token>"
+            output_str += start_frame_token + transcript_dict["transcript"] + end_frame_token
+        output_str += "<eos_token>"  # TODO: don't hardcode here, use the actual eos_token str of the model.
+        return output_str
+
+
+class VideoDescriptionTransform(AbstractTransform):
+    # TODO: maybe do some inheritance situation with VideoDescriptionTransform and VideoTranscriptTransform. But also maybe not necessary since there's just these two classes.
+    # Implementation-wise they are very similar (Except that descriptions have the consecutive frame constraint), but differ conceptually because transcripts are like dialogue/etc. and descriptions are "what's happening"/every seq of frames can have a description.
+    def __init__(self, aligned_captions=True, no_aug=False):
+        # TODO: what are these args? Do we still need them?
+        self.aligned_captions = aligned_captions
+        self.no_aug = no_aug
+
+    def load(self, path) -> List[dict]:
+        # TODO: decide on the representation of the input description (how do we know which frames each caption maps to?)
+        # Caption can either be stored as .txt or .json.gz (in which case it's a list of dicts)
+        """
+        For now, assume we have something like a jsonlines of descriptions for each clip/sequence of frames in a video.:
+        [
+            {
+                "description": "here's a description",
+                "start_frame_index": 0,
+                "end_frame_index": 5,
+            },
+            {
+                "description": "here's another description",
+                "start_frame_index": 5,
+                "end_frame_index": 12,
+            } # Note that the description NEEDS to be consecutive in all frames, e.g., the end frame of one description is the start frame of the next.
+        ]
+        """
+        with jsonlines.open(path, "r") as jsonl_f:
+            descs_per_clip = [obj for obj in jsonl_f]
+
+        return descs_per_clip
+
+    def preprocess(self, sample: List[dict]):
+        # Check that each clip's description frame indices are consecutive.
+        for i in range(len(sample) - 1):
+            desc_dict = sample[i]
+            next_desc_dict = sample[i + 1]
+            if next_desc_dict["start_frame_index"] != desc_dict["end_frame_index"]:
+                raise ValueError(
+                    "Frame indices of descriptions are not consecutive, which is a definitional requirement of descriptions. Double check how the descriptions are created upstream."
+                )
+        return sample
+
+    def image_augment(
+        self,
+        val,
+        crop_coords: Tuple,
+        flip: bool,
+        orig_size: Tuple,
+        target_size: Tuple,
+        rand_aug_idx: Optional[int],
+        resample_mode: str = None,
+    ) -> List[dict]:
+        # TODO: decide what augmentaitons might be appropriate for descriptions here?
+        print(
+            "WARNING: no augmentations implemented for descriptions yet. Decide whether to augment/what these should be and then remove this warning."
+        )
+        return val
+
+    def postprocess(self, sample: List[dict]) -> str:
+        """
+        Given a list of {text, start_frame, end_frame} dicts, we want to return a string in the format:
+        <0th_start_frame_token>0th transcript text blah blah<0th_end_frame_token><1st_start_frame_token>1st transcript text blah blah<1st_end_frame_token>...<eos_token>.
+        Example: given
+        [
+            {
+                "description": "here's a description",
+                "start_frame_index": 0,
+                "end_frame_index": 5,
+            },
+            {
+                "description": "here's another description",
+                "start_frame_index": 5,
+                "end_frame_index": 12,
+            } # Note that the description NEEDS to be consecutive in all frames, e.g., the end frame of one description is the start frame of the next.
+        ]
+
+        We should have
+        <frame_0_token>here's a description<frame_5_token><frame_5_token>here's another description<frame_12_token><eos_token>
+        """
+        output_str = ""
+        for transcript_dict in sample:
+            start_frame_token = f"<frame_{transcript_dict['start_frame_index']}_token>"
+            end_frame_token = f"<frame_{transcript_dict['end_frame_index']}_token>"
+            output_str += start_frame_token + transcript_dict["transcript"] + end_frame_token
+        output_str += "<eos_token>"  # TODO: don't hardcode here, use the actual eos_token str of the model.
+        return output_str
+
+
+class CaptionEmbTransform(AbstractTransform):
+    # CaptionEmbTransform for the caption embeddings
     def __init__(self, aligned_captions=True, no_aug=False):
         self.aligned_captions = aligned_captions
         self.no_aug = no_aug
@@ -969,7 +1339,6 @@ class CaptionEmbTransform(AbstractTransform):
 
 
 class MetadataTransform(AbstractTransform):
-
     def __init__(
         self,
         special_vmin: int = 0,
@@ -1150,7 +1519,6 @@ class MetadataTransform(AbstractTransform):
 
 
 class HumanPoseTransform(AbstractTransform):
-
     def __init__(self, coord_bins=1000, only_pose=False, return_raw=False):
         self.coord_bins = coord_bins
         self.return_raw = return_raw
@@ -1351,7 +1719,6 @@ class HumanPoseTransform(AbstractTransform):
 
 
 class ColorPaletteTransform(AbstractTransform):
-
     def __init__(self, coord_bins=1000, return_raw=False):
         self.coord_bins = coord_bins
         self.return_raw = return_raw
@@ -1414,7 +1781,6 @@ class ColorPaletteTransform(AbstractTransform):
 
 
 class SAMInstanceTokTransform(AbstractTransform):
-
     def __init__(self, image_size=224, points_per_side=7, point_order="random"):
         self.H, self.W = to_2tuple(image_size)
         self.points_per_h, self.points_per_w = to_2tuple(points_per_side)
@@ -1477,7 +1843,7 @@ class SAMInstanceTokTransform(AbstractTransform):
                 result_text.append("none")
             else:
                 for tok, bbox in target_tokens[point]:
-                    result_text.append(f"polygon")
+                    result_text.append("polygon")
 
                     # Add bounding box coordinates to the string
                     ymin, xmin, ymax, xmax = bbox.astype(np.int32)
@@ -1533,7 +1899,6 @@ class SAMInstanceTokTransform(AbstractTransform):
 
 
 class CropSettingsTransform(AbstractTransform):
-
     def load(self, path):
         sample = np.load(path)
         return sample
@@ -1558,7 +1923,6 @@ class CropSettingsTransform(AbstractTransform):
 
 
 class IdentityTransform(AbstractTransform):
-
     def load(self, path):
         raise NotImplementedError("IdentityTransform does not support loading")
 
@@ -1582,7 +1946,6 @@ class IdentityTransform(AbstractTransform):
 
 
 class JSONTransform(AbstractTransform):
-
     def load(self, path):
         if path.endswith(".json"):
             with open(path, "r") as f:
@@ -1609,3 +1972,4 @@ class JSONTransform(AbstractTransform):
 
     def postprocess(self, sample):
         return sample
+# CaptionEmbTransform for the caption embeddings
